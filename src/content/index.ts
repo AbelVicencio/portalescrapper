@@ -16,6 +16,7 @@ function detectSite(): { site: string; name: string } | null {
     'reuters.com': 'Reuters',
     'ft.com': 'Financial Times',
     'pressreader.com': 'PressReader',
+    'bloomberg.com': 'Bloomberg',
     'washingtonpost.com': 'Washington Post',
     'elpais.com': 'El País',
     'reforma.com': 'Reforma',
@@ -41,14 +42,62 @@ function detectSite(): { site: string; name: string } | null {
   return null;
 }
 
+function getCleanUrl(): string {
+  // 1. Try canonical link
+  try {
+    const canonicalEl = document.querySelector('link[rel="canonical"]');
+    if (canonicalEl) {
+      const href = canonicalEl.getAttribute('href');
+      if (href) {
+        const absoluteUrl = new URL(href, window.location.href).href;
+        if (absoluteUrl.startsWith('http://') || absoluteUrl.startsWith('https://')) {
+          return absoluteUrl;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[PortalScrapper] Error resolving canonical URL:', e);
+  }
+
+  // 2. Try OG URL meta tag
+  try {
+    const ogUrlEl = document.querySelector('meta[property="og:url"]');
+    if (ogUrlEl) {
+      const content = ogUrlEl.getAttribute('content');
+      if (content) {
+        const absoluteUrl = new URL(content, window.location.href).href;
+        if (absoluteUrl.startsWith('http://') || absoluteUrl.startsWith('https://')) {
+          return absoluteUrl;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[PortalScrapper] Error resolving OG URL:', e);
+  }
+
+  // 3. Fallback: Strip common tracking query params
+  try {
+    const url = new URL(window.location.href);
+    const trackers = [
+      'mod', 'pos', 'page', 'utm_source', 'utm_medium', 'utm_campaign', 
+      'utm_term', 'utm_content', 'ref', 'ref_', 'fbclid', 'gclid', 'yclid', 'pos', 'pos_'
+    ];
+    trackers.forEach(t => url.searchParams.delete(t));
+    return url.toString();
+  } catch {
+    return window.location.href;
+  }
+}
+
 function buildArticleFromExtraction(extracted: any): Partial<NewsArticle> {
   const now = new Date().toISOString();
   const host = getHostname();
+  const cleanUrl = getCleanUrl();
 
   return {
     id: generateUUID(),
     source: host,
-    url: window.location.href,
+    url: cleanUrl,
     urlWithParams: window.location.href,
 
     emisora: 0,
@@ -60,7 +109,7 @@ function buildArticleFromExtraction(extracted: any): Partial<NewsArticle> {
     autor: extracted.autor || '',
     medio: extracted.medio || detectSite()?.name || host,
 
-    abstract: window.location.href,
+    abstract: cleanUrl,
     texto: extracted.texto || extracted.content || '',
     subtitulo: extracted.subtitulo || '',
     seccion: extracted.seccion || '',

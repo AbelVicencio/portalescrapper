@@ -176,6 +176,9 @@ export async function healthCheck(): Promise<boolean> {
       });
 
       if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          throw new APIMedialogError(res.status, 'Token expirado o inválido');
+        }
         console.warn(`[PortalScrapper] Error al consultar emisiones: ${res.status}`);
         return null;
       }
@@ -190,6 +193,9 @@ export async function healthCheck(): Promise<boolean> {
 
       return null;
     } catch (e) {
+      if (e instanceof APIMedialogError && (e.status === 401 || e.status === 403)) {
+        throw e;
+      }
       console.error('[PortalScrapper] Error en resolveEmisionPorEmisoraYFecha:', e);
       return null;
     }
@@ -231,7 +237,12 @@ export async function healthCheck(): Promise<boolean> {
         const res = await fetch(urlBusqueda, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            throw new APIMedialogError(res.status, 'Token expirado o inválido');
+          }
+          return null;
+        }
 
         const json = await res.json();
         console.log('[PortalScrapper] RAW respuesta URL search:', JSON.stringify(json).slice(0, 300));
@@ -243,7 +254,10 @@ export async function healthCheck(): Promise<boolean> {
           if (id > 0) return id;
         }
         return null;
-      } catch {
+      } catch (e: any) {
+        if (e instanceof APIMedialogError && (e.status === 401 || e.status === 403)) {
+          throw e;
+        }
         return null;
       }
     }
@@ -284,7 +298,12 @@ export async function healthCheck(): Promise<boolean> {
         const res = await fetch(urlBusqueda, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            throw new APIMedialogError(res.status, 'Token expirado o inválido');
+          }
+          return null;
+        }
 
         const json = await res.json();
         console.log('[PortalScrapper] RAW respuesta título search:', JSON.stringify(json).slice(0, 300));
@@ -296,7 +315,10 @@ export async function healthCheck(): Promise<boolean> {
           if (id > 0) return id;
         }
         return null;
-      } catch {
+      } catch (e: any) {
+        if (e instanceof APIMedialogError && (e.status === 401 || e.status === 403)) {
+          throw e;
+        }
         return null;
       }
     }
@@ -362,6 +384,9 @@ export async function healthCheck(): Promise<boolean> {
       });
 
       if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          throw new APIMedialogError(res.status, 'Token expirado o inválido');
+        }
         const errText = await res.text();
         console.warn(`[PortalScrapper] Error al crear relación medialog=${medialog} clasificacion=${clasificacion}: ${res.status} - ${errText}`);
         return false;
@@ -370,6 +395,9 @@ export async function healthCheck(): Promise<boolean> {
       console.log(`[PortalScrapper] ✅ Relación creada: medialog=${medialog}, clasificacion=${clasificacion}, tipo=${tipo}`);
       return true;
     } catch (e) {
+      if (e instanceof APIMedialogError && (e.status === 401 || e.status === 403)) {
+        throw e;
+      }
       console.error('[PortalScrapper] Error creando relación:', e);
       return false;
     }

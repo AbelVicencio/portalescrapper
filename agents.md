@@ -72,7 +72,7 @@ Chrome/Edge extension (Manifest V3) with a **Side Panel** UI for passive news ar
 ### 4. Data Integrity & API Sync
 - Always normalize `fecha` to **Mexico City local time** (`America/Mexico_City`) before saving or using it for searches.
 - Always normalize transcription text to preserve paragraph breaks using `\n\n`.
-- `abstract` must **always** contain the original article URL.
+- `abstract` and `url` must **always** contain the clean permalink URL (resolved via canonical tag, og:url, or parameter-stripping). Use `urlWithParams` to keep the raw URL with query parameters.
 - After a successful save, automatically create relations if configured in `portalClassifications.ts`.
 - Perform two-tier saving: local first (`chrome.storage.local`), then API.
 
@@ -125,7 +125,10 @@ JSON-LD (0.95) → Site-Specific (0.85) → Meta Tags (0.75) → Generic (0.50) 
 - **Generic** (`src/extractors/generic.ts`): Text density heuristics, universal selectors (`article`, `main`, `[itemprop="articleBody"]`), automatic noise filtering. Works on **any** news site.
 - **Manual**: User fills in the form directly.
 
-The merge rule is "first non-null value wins" — higher layers take priority.
+The general merge rule is "first non-null value wins" — higher confidence layers take priority for metadata. However, **text content (article body)** uses **Smart Text Merging** in `mergeResults()`:
+- Curated `site-specific` content is prioritized over `json-ld` truncated/teaser previews.
+- If a lower confidence layer (like `site-specific` or `generic`) finds a text body that is significantly longer (e.g. >1.3x) than the one found by `json-ld` or `meta-tags`, it will overwrite it to capture the complete article.
+- Curated `site-specific` text is preserved against being overwritten by noisy slightly longer `generic` extracts unless the new text is significantly longer.
 
 ### Adding automatic classifications for a portal
 Edit `src/config/portalClassifications.ts`:

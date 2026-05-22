@@ -280,6 +280,9 @@
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          throw new APIMedialogError(res.status, "Token expirado o inv\xE1lido");
+        }
         console.warn(`[PortalScrapper] Error al consultar emisiones: ${res.status}`);
         return null;
       }
@@ -291,6 +294,9 @@
       }
       return null;
     } catch (e) {
+      if (e instanceof APIMedialogError && (e.status === 401 || e.status === 403)) {
+        throw e;
+      }
       console.error("[PortalScrapper] Error en resolveEmisionPorEmisoraYFecha:", e);
       return null;
     }
@@ -311,7 +317,12 @@
         const res = await fetch(urlBusqueda, {
           headers: { Authorization: `Bearer ${token2}` }
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            throw new APIMedialogError(res.status, "Token expirado o inv\xE1lido");
+          }
+          return null;
+        }
         const json = await res.json();
         console.log("[PortalScrapper] RAW respuesta URL search:", JSON.stringify(json).slice(0, 300));
         const registros = json?.data?.registros || [];
@@ -321,7 +332,10 @@
           if (id > 0) return id;
         }
         return null;
-      } catch {
+      } catch (e) {
+        if (e instanceof APIMedialogError && (e.status === 401 || e.status === 403)) {
+          throw e;
+        }
         return null;
       }
     }
@@ -348,7 +362,12 @@
         const res = await fetch(urlBusqueda, {
           headers: { Authorization: `Bearer ${token2}` }
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            throw new APIMedialogError(res.status, "Token expirado o inv\xE1lido");
+          }
+          return null;
+        }
         const json = await res.json();
         console.log("[PortalScrapper] RAW respuesta t\xEDtulo search:", JSON.stringify(json).slice(0, 300));
         const registros = json?.data?.registros || [];
@@ -358,7 +377,10 @@
           if (id > 0) return id;
         }
         return null;
-      } catch {
+      } catch (e) {
+        if (e instanceof APIMedialogError && (e.status === 401 || e.status === 403)) {
+          throw e;
+        }
         return null;
       }
     }
@@ -402,6 +424,9 @@
         body: JSON.stringify(payload)
       });
       if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          throw new APIMedialogError(res.status, "Token expirado o inv\xE1lido");
+        }
         const errText = await res.text();
         console.warn(`[PortalScrapper] Error al crear relaci\xF3n medialog=${medialog} clasificacion=${clasificacion}: ${res.status} - ${errText}`);
         return false;
@@ -409,6 +434,9 @@
       console.log(`[PortalScrapper] \u2705 Relaci\xF3n creada: medialog=${medialog}, clasificacion=${clasificacion}, tipo=${tipo}`);
       return true;
     } catch (e) {
+      if (e instanceof APIMedialogError && (e.status === 401 || e.status === 403)) {
+        throw e;
+      }
       console.error("[PortalScrapper] Error creando relaci\xF3n:", e);
       return false;
     }
@@ -547,6 +575,21 @@
     currentToken = sess.token;
     currentUser = sess.usuario;
     return true;
+  }
+  function isAuthError(err) {
+    if (!err) return false;
+    if (err.status === 401 || err.status === 403) return true;
+    const msg = (err.message || err.toString()).toLowerCase();
+    return msg.includes("401") || msg.includes("403") || msg.includes("token") || msg.includes("expir");
+  }
+  async function checkAndHandleAuthError(err) {
+    if (isAuthError(err)) {
+      console.warn("[PortalScrapper] Auth error detected \u2013 logging out", err);
+      showToast("Sesi\xF3n expirada o inv\xE1lida. Inicia sesi\xF3n de nuevo.");
+      await handleLogout();
+      return true;
+    }
+    return false;
   }
   function applyTheme(theme) {
     document.body.classList.toggle("light", theme === "light");
@@ -850,6 +893,7 @@
       }
     } catch (e) {
       console.error("[PortalScrapper] autoResolveEmisora error:", e);
+      await checkAndHandleAuthError(e);
     } finally {
       isResolving = false;
     }
@@ -973,7 +1017,10 @@
         }
       }
     } catch (err) {
-      showToast("Error API: " + (err.message || err));
+      const handled = await checkAndHandleAuthError(err);
+      if (!handled) {
+        showToast("Error API: " + (err.message || err));
+      }
     }
   }
   async function handleReExtract() {
@@ -1097,19 +1144,24 @@
     const emisoraInputForListener = el("emisora");
     if (emisoraInputForListener) {
       emisoraInputForListener.addEventListener("change", async () => {
-        if (!await ensureValidSession()) return;
-        if (!currentToken) return;
-        const fecha = el("fecha")?.value;
-        const newEmisora = parseInt(emisoraInputForListener.value, 10);
-        const emisionInput = el("emision");
-        if (newEmisora > 0 && fecha && emisionInput) {
-          const emision = await resolveEmisionPorEmisoraYFecha(currentToken, newEmisora, fecha);
-          if (emision) {
-            emisionInput.value = String(emision);
-            currentArticle.emision = emision;
-            currentArticle.emisora = newEmisora;
-            console.log(`[PortalScrapper] Emisi\xF3n re-resuelta por cambio manual de Emisora \u2192 ${emision}`);
+        try {
+          if (!await ensureValidSession()) return;
+          if (!currentToken) return;
+          const fecha = el("fecha")?.value;
+          const newEmisora = parseInt(emisoraInputForListener.value, 10);
+          const emisionInput = el("emision");
+          if (newEmisora > 0 && fecha && emisionInput) {
+            const emision = await resolveEmisionPorEmisoraYFecha(currentToken, newEmisora, fecha);
+            if (emision) {
+              emisionInput.value = String(emision);
+              currentArticle.emision = emision;
+              currentArticle.emisora = newEmisora;
+              console.log(`[PortalScrapper] Emisi\xF3n re-resuelta por cambio manual de Emisora \u2192 ${emision}`);
+            }
           }
+        } catch (err) {
+          console.error("[PortalScrapper] Error al cambiar emisora manualmente:", err);
+          await checkAndHandleAuthError(err);
         }
       });
     }

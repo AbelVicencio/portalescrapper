@@ -18,6 +18,8 @@ export function mergeResults(results: ExtractorResult[]): Partial<import('../typ
   const merged: any = {};
   let highestConfidence = 0;
 
+  let textMethod = '';
+
   for (const r of results) {
     if (r.confidence > highestConfidence) {
       highestConfidence = r.confidence;
@@ -25,7 +27,30 @@ export function mergeResults(results: ExtractorResult[]): Partial<import('../typ
     if (r.title && !merged.superabstract) merged.superabstract = r.title;
     if (r.author && !merged.autor) merged.autor = r.author;
     if (r.date && !merged.fecha) merged.fecha = r.date;
-    if (r.content && !merged.texto) merged.texto = r.content;
+    
+    // Smart Text Content Merging Logic
+    if (r.content) {
+      if (!merged.texto) {
+        merged.texto = r.content;
+        textMethod = r.method;
+      } else {
+        const isNewSiteSpecific = r.method === 'site-specific';
+        const isPrevSiteSpecific = textMethod === 'site-specific';
+        const isMuchLonger = r.content.length > (merged.texto.length * 1.3);
+
+        // Overwrite existing text if:
+        // 1. The new text is curated/site-specific and is reasonably long (> 150 chars).
+        // 2. The new text is significantly longer (meaning the previous one was likely a teaser or description).
+        if (
+          (isNewSiteSpecific && !isPrevSiteSpecific && r.content.length > 150) ||
+          (isMuchLonger && (!isPrevSiteSpecific || isNewSiteSpecific))
+        ) {
+          merged.texto = r.content;
+          textMethod = r.method;
+        }
+      }
+    }
+
     if (r.subtitle && !merged.subtitulo) merged.subtitulo = r.subtitle;
     if (r.section && !merged.seccion) merged.seccion = r.section;
     if (r.imageUrls?.length && !merged.imageUrls) merged.imageUrls = r.imageUrls;

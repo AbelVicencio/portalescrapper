@@ -1,4 +1,5 @@
 import { ExtractorResult } from './base';
+import { cleanWSJText, cleanBloombergText } from './siteSpecific';
 
 /**
  * Extractor Genérico Universal
@@ -386,7 +387,19 @@ export function extractGeneric(): ExtractorResult {
   // ── Texto completo (el santo grial) ──
   const container = findBestContainer();
   if (container) {
-    const text = extractCleanText(container);
+    // Clone container to prevent mutating the live page DOM
+    const cloned = container.cloneNode(true) as Element;
+    // Remove scripts, styles, noscripts, iframes, svgs, canvas and interactive elements to avoid code/widget leaks
+    const elementsToRemove = cloned.querySelectorAll('script, style, noscript, iframe, svg, canvas, button, select, option');
+    elementsToRemove.forEach(el => el.remove());
+
+    let text = extractCleanText(cloned);
+    if (window.location.hostname.includes('wsj.com') && text) {
+      text = cleanWSJText(text);
+    }
+    if (window.location.hostname.includes('bloomberg.com') && text) {
+      text = cleanBloombergText(text);
+    }
     if (text.length > 80) {
       result.content = text;
     }

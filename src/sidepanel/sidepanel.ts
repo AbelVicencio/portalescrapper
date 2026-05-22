@@ -142,8 +142,19 @@ async function ensureValidSession(): Promise<boolean> {
 /** Detects any 401/403/expired token error that comes from the API client */
 function isAuthError(err: any): boolean {
   if (!err) return false;
+  if (err.status === 401 || err.status === 403) return true;
   const msg = (err.message || err.toString()).toLowerCase();
   return msg.includes('401') || msg.includes('403') || msg.includes('token') || msg.includes('expir');
+}
+
+async function checkAndHandleAuthError(err: any): Promise<boolean> {
+  if (isAuthError(err)) {
+    console.warn('[PortalScrapper] Auth error detected – logging out', err);
+    showToast('Sesión expirada o inválida. Inicia sesión de nuevo.');
+    await handleLogout();
+    return true;
+  }
+  return false;
 }
 
 function applyTheme(theme: 'dark' | 'light') {
@@ -491,6 +502,7 @@ async function autoResolveEmisora(url: string) {
     }
   } catch (e) {
     console.error('[PortalScrapper] autoResolveEmisora error:', e);
+    await checkAndHandleAuthError(e);
   } finally {
     isResolving = false;
   }
@@ -669,7 +681,10 @@ async function handleGrabarAPI() {
       }
     }
   } catch (err: any) {
-    showToast('Error API: ' + (err.message || err));
+    const handled = await checkAndHandleAuthError(err);
+    if (!handled) {
+      showToast('Error API: ' + (err.message || err));
+    }
   }
 }
 
@@ -822,19 +837,24 @@ async function initMainUI() {
   const emisoraInputForListener = el('emisora') as HTMLInputElement | null;
   if (emisoraInputForListener) {
     emisoraInputForListener.addEventListener('change', async () => {
-      if (!(await ensureValidSession())) return;
-      if (!currentToken) return;
-      const fecha = (el('fecha') as HTMLInputElement | null)?.value;
-      const newEmisora = parseInt(emisoraInputForListener.value, 10);
-      const emisionInput = el('emision') as HTMLInputElement | null;
-      if (newEmisora > 0 && fecha && emisionInput) {
-        const emision = await resolveEmisionPorEmisoraYFecha(currentToken!, newEmisora, fecha);
-        if (emision) {
-          emisionInput.value = String(emision);
-          currentArticle.emision = emision;
-          currentArticle.emisora = newEmisora;
-          console.log(`[PortalScrapper] Emisión re-resuelta por cambio manual de Emisora → ${emision}`);
+      try {
+        if (!(await ensureValidSession())) return;
+        if (!currentToken) return;
+        const fecha = (el('fecha') as HTMLInputElement | null)?.value;
+        const newEmisora = parseInt(emisoraInputForListener.value, 10);
+        const emisionInput = el('emision') as HTMLInputElement | null;
+        if (newEmisora > 0 && fecha && emisionInput) {
+          const emision = await resolveEmisionPorEmisoraYFecha(currentToken!, newEmisora, fecha);
+          if (emision) {
+            emisionInput.value = String(emision);
+            currentArticle.emision = emision;
+            currentArticle.emisora = newEmisora;
+            console.log(`[PortalScrapper] Emisión re-resuelta por cambio manual de Emisora → ${emision}`);
+          }
         }
+      } catch (err: any) {
+        console.error('[PortalScrapper] Error al cambiar emisora manualmente:', err);
+        await checkAndHandleAuthError(err);
       }
     });
   }
