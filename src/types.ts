@@ -10,6 +10,7 @@ export interface NewsArticle {
   emisora: number;
   emision: number;
   fecha: string;
+  fecha_transcripcion?: string;
   usuario: string;
   evento: number;
   superabstract: string;

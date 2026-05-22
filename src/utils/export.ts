@@ -57,6 +57,7 @@ export function exportToJSON(articles: NewsArticle[]): void {
   const normalizedArticles = articles.map(a => ({
     ...a,
     fecha: toMexicoCityLocalISO(a.fecha),
+    fecha_transcripcion: toMexicoCityLocalISO(a.fecha_transcripcion || a.fecha),
     texto: normalizeTranscription(a.texto),
   }));
 
@@ -80,6 +81,7 @@ export function exportToCSV(articles: NewsArticle[]): void {
     'id',
     'medio',
     'fecha',
+    'fecha_transcripcion',
     'superabstract',
     'autor',
     'texto',
@@ -103,6 +105,7 @@ export function exportToCSV(articles: NewsArticle[]): void {
       csvEscape(a.id),
       csvEscape(a.medio),
       csvEscape(toMexicoCityLocalISO(a.fecha)),
+      csvEscape(toMexicoCityLocalISO(a.fecha_transcripcion || a.fecha)),
       csvEscape(a.superabstract),
       csvEscape(a.autor),
       csvEscape(normalizeTranscription(a.texto)),

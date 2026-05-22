@@ -82,6 +82,7 @@
     const normalizedArticles = articles.map((a2) => ({
       ...a2,
       fecha: toMexicoCityLocalISO(a2.fecha),
+      fecha_transcripcion: toMexicoCityLocalISO(a2.fecha_transcripcion || a2.fecha),
       texto: normalizeTranscription(a2.texto)
     }));
     const payload = {
@@ -103,6 +104,7 @@
       "id",
       "medio",
       "fecha",
+      "fecha_transcripcion",
       "superabstract",
       "autor",
       "texto",
@@ -125,6 +127,7 @@
         csvEscape(a2.id),
         csvEscape(a2.medio),
         csvEscape(toMexicoCityLocalISO(a2.fecha)),
+        csvEscape(toMexicoCityLocalISO(a2.fecha_transcripcion || a2.fecha)),
         csvEscape(a2.superabstract),
         csvEscape(a2.autor),
         csvEscape(normalizeTranscription(a2.texto)),
@@ -155,6 +158,21 @@
 
   // src/api/client.ts
   var BASE_URL = "https://api.medialog.com.mx/v1";
+  async function fetchWithTimeout(url, options = {}, timeoutMs = 15e3) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(id);
+      return response;
+    } catch (err) {
+      clearTimeout(id);
+      if (err.name === "AbortError") {
+        throw new APIMedialogError(408, "El servidor tard\xF3 demasiado en responder (Timeout).");
+      }
+      throw err;
+    }
+  }
   var APIMedialogError = class extends Error {
     constructor(status, message) {
       super(message);
@@ -163,7 +181,7 @@
     }
   };
   async function getToken(username, password) {
-    const res = await fetch(`${BASE_URL}/auth/token`, {
+    const res = await fetchWithTimeout(`${BASE_URL}/auth/token`, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -177,7 +195,7 @@
   }
   async function resolvePortalByDomain(token, baseDomain, fullHostname) {
     const url = `${BASE_URL}/portales/?dominio=${encodeURIComponent(baseDomain)}`;
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) throw new APIMedialogError(res.status, "Error resolving portal");
@@ -234,7 +252,7 @@
     };
   }
   async function grabarMedialog(token, payload) {
-    const res = await fetch(`${BASE_URL}/medialogs/`, {
+    const res = await fetchWithTimeout(`${BASE_URL}/medialogs/`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -276,7 +294,7 @@
       const fechaInicio = fecha;
       const fechaFin = fecha;
       const url = `${BASE_URL}/emisiones/emisora/${emisora}?fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`;
-      const res = await fetch(url, {
+      const res = await fetchWithTimeout(url, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) {
@@ -314,7 +332,7 @@
         if (emisoraParam) params.set("emisora", emisoraParam);
         const urlBusqueda = `${BASE_URL}/medialogs/?${params.toString()}`;
         console.log(`[PortalScrapper] B\xFAsqueda URL ${emisoraParam ? "con" : "sin"} emisora: ${urlBusqueda}`);
-        const res = await fetch(urlBusqueda, {
+        const res = await fetchWithTimeout(urlBusqueda, {
           headers: { Authorization: `Bearer ${token2}` }
         });
         if (!res.ok) {
@@ -359,7 +377,7 @@
         if (emisoraParam) params.set("emisora", emisoraParam);
         const urlBusqueda = `${BASE_URL}/medialogs/?${params.toString()}`;
         console.log(`[PortalScrapper] B\xFAsqueda t\xEDtulo ${emisoraParam ? "con" : "sin"} emisora: ${urlBusqueda}`);
-        const res = await fetch(urlBusqueda, {
+        const res = await fetchWithTimeout(urlBusqueda, {
           headers: { Authorization: `Bearer ${token2}` }
         });
         if (!res.ok) {
@@ -415,7 +433,7 @@
         fecha,
         tipo
       };
-      const res = await fetch(`${BASE_URL}/relaciones/medialogs`, {
+      const res = await fetchWithTimeout(`${BASE_URL}/relaciones/medialogs`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -742,6 +760,7 @@
     setVal("portal", String(article.portal ?? article.pendiente ?? ""));
     setVal("emision", String(article.emision || 4659889));
     setVal("fecha", article.fecha || "");
+    setVal("fecha_transcripcion", article.fecha_transcripcion || "");
     setVal("dbRecordId", String(article.dbRecordId || ""));
     setVal("medio", article.medio || "");
     setVal("autor", article.autor || "");
@@ -760,7 +779,8 @@
       urlWithParams: getVal("url"),
       emisora: parseInt(getVal("emisora"), 10) || 0,
       emision: parseInt(getVal("emision"), 10) || 4659889,
-      fecha: toMexicoCityLocalISO2(getVal("fecha") || now),
+      fecha: currentArticle.fecha || toMexicoCityLocalISO2(now),
+      fecha_transcripcion: toMexicoCityLocalISO2(getVal("fecha_transcripcion") || getVal("fecha") || now),
       usuario: currentUser || "anon",
       evento: 1,
       superabstract: getVal("superabstract"),
@@ -877,12 +897,12 @@
           currentArticle.pais = result.pais;
         }
         updatePortalHeader();
-        if (result.emisora && currentArticle.fecha) {
+        if (result.emisora && currentArticle.fecha_transcripcion) {
           const emisionInput = el("emision");
           const emision = await resolveEmisionPorEmisoraYFecha(
             currentToken,
             result.emisora,
-            currentArticle.fecha
+            currentArticle.fecha_transcripcion
           );
           if (emision && emisionInput) {
             emisionInput.value = String(emision);
@@ -943,7 +963,7 @@
     const duplicadoId = await buscarMedialogDuplicado(
       currentToken,
       article.emisora || 0,
-      article.fecha || "",
+      article.fecha_transcripcion || "",
       article.superabstract || "",
       article.url || article.urlWithParams || ""
     );
@@ -957,6 +977,7 @@
       updateBadge();
       return;
     }
+    article.fecha = toMexicoCityLocalISO2(/* @__PURE__ */ new Date());
     article.status = "draft";
     article.usuario = currentUser;
     await saveArticle(article);
@@ -970,6 +991,7 @@
       emisora: article.emisora,
       emision: article.emision,
       fecha: article.fecha,
+      fecha_transcripcion: article.fecha_transcripcion,
       usuario: article.usuario,
       evento: article.evento,
       superabstract: article.superabstract.slice(0, 200),
@@ -1010,7 +1032,7 @@
               currentToken,
               dbId,
               clasificacion,
-              article.fecha || payload.fecha,
+              article.fecha || payload.fecha || "",
               "R"
             );
           }
@@ -1043,8 +1065,8 @@
   }
   function loadArticleIntoUI(article) {
     currentArticle = { ...article };
-    if (currentArticle.fecha) {
-      currentArticle.fecha = toMexicoCityLocalISO2(currentArticle.fecha);
+    if (currentArticle.fecha_transcripcion) {
+      currentArticle.fecha_transcripcion = toMexicoCityLocalISO2(currentArticle.fecha_transcripcion);
     }
     if (currentArticle.texto) {
       currentArticle.texto = normalizeTranscription2(currentArticle.texto);
@@ -1060,9 +1082,13 @@
         const previousUrl = currentArticle.url || "";
         currentArticle = { ...currentArticle, ...msg.payload };
         if (!currentArticle.id) currentArticle.id = crypto.randomUUID();
-        if (currentArticle.fecha) {
-          currentArticle.fecha = toMexicoCityLocalISO2(
-            currentArticle.fecha.replace(/\|.*/g, "").trim()
+        if (msg.payload.fecha) {
+          currentArticle.fecha_transcripcion = msg.payload.fecha;
+          delete currentArticle.fecha;
+        }
+        if (currentArticle.fecha_transcripcion) {
+          currentArticle.fecha_transcripcion = toMexicoCityLocalISO2(
+            currentArticle.fecha_transcripcion.replace(/\|.*/g, "").trim()
           );
         }
         if (currentArticle.texto) {
@@ -1091,6 +1117,21 @@
       }
     });
   }
+  async function loadRememberedCredentials() {
+    const creds = await chrome.storage.local.get(["remembered_user", "remembered_pass", "remembered_enabled"]);
+    const userEl = el("login-user");
+    const passEl = el("login-pass");
+    const rememberEl = el("login-remember");
+    if (creds.remembered_enabled) {
+      if (userEl && creds.remembered_user) userEl.value = creds.remembered_user;
+      if (passEl && creds.remembered_pass) passEl.value = creds.remembered_pass;
+      if (rememberEl) rememberEl.checked = true;
+    } else {
+      if (rememberEl) rememberEl.checked = false;
+      if (userEl && creds.remembered_user) userEl.value = creds.remembered_user;
+      if (passEl) passEl.value = "";
+    }
+  }
   async function handleLogin() {
     const user = el("login-user").value.trim();
     const pass = el("login-pass").value;
@@ -1106,6 +1147,19 @@
       const sess = await getCurrentUser();
       currentToken = sess?.token || null;
       el("logged-user").textContent = currentUser;
+      const rememberChk = el("login-remember");
+      if (rememberChk && rememberChk.checked) {
+        await chrome.storage.local.set({
+          remembered_user: user,
+          remembered_pass: pass,
+          remembered_enabled: true
+        });
+      } else {
+        await chrome.storage.local.set({
+          remembered_enabled: false
+        });
+        await chrome.storage.local.remove(["remembered_pass"]);
+      }
       showScreen("main");
       await renderHistory();
     } else {
@@ -1117,6 +1171,7 @@
     currentUser = null;
     currentToken = null;
     showScreen("login");
+    await loadRememberedCredentials();
   }
   async function initMainUI() {
     const sess = await getCurrentUser();
@@ -1147,7 +1202,7 @@
         try {
           if (!await ensureValidSession()) return;
           if (!currentToken) return;
-          const fecha = el("fecha")?.value;
+          const fecha = el("fecha_transcripcion")?.value;
           const newEmisora = parseInt(emisoraInputForListener.value, 10);
           const emisionInput = el("emision");
           if (newEmisora > 0 && fecha && emisionInput) {
@@ -1165,7 +1220,7 @@
         }
       });
     }
-    const fechaInput = el("fecha");
+    const fechaInput = el("fecha_transcripcion");
     if (fechaInput) {
       fechaInput.addEventListener("blur", () => {
         if (fechaInput.value) {
@@ -1173,7 +1228,7 @@
           if (normalized !== fechaInput.value) {
             fechaInput.value = normalized;
           }
-          currentArticle.fecha = normalized;
+          currentArticle.fecha_transcripcion = normalized;
         }
       });
     }
@@ -1238,12 +1293,29 @@
       await initMainUI();
     } else {
       showScreen("login");
+      await loadRememberedCredentials();
       const loginBtn = el("btn-login");
-      if (loginBtn) loginBtn.onclick = handleLogin;
+      if (loginBtn) {
+        loginBtn.onclick = async () => {
+          loginBtn.disabled = true;
+          try {
+            await handleLogin();
+          } finally {
+            loginBtn.disabled = false;
+          }
+        };
+      }
       const loginPass = el("login-pass");
       if (loginPass) {
-        loginPass.addEventListener("keydown", (ev) => {
-          if (ev.key === "Enter") handleLogin();
+        loginPass.addEventListener("keydown", async (ev) => {
+          if (ev.key === "Enter") {
+            if (loginBtn) loginBtn.disabled = true;
+            try {
+              await handleLogin();
+            } finally {
+              if (loginBtn) loginBtn.disabled = false;
+            }
+          }
         });
       }
     }

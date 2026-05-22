@@ -1,5 +1,21 @@
 const BASE_URL = 'https://api.medialog.com.mx/v1';
 
+export async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs: number = 15000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return response;
+  } catch (err: any) {
+    clearTimeout(id);
+    if (err.name === 'AbortError') {
+      throw new APIMedialogError(408, 'El servidor tardó demasiado en responder (Timeout).');
+    }
+    throw err;
+  }
+}
+
 export class APIMedialogError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -8,7 +24,7 @@ export class APIMedialogError extends Error {
 }
 
 export async function getToken(username: string, password: string): Promise<{ access_token: string; usuario: string }> {
-  const res = await fetch(`${BASE_URL}/auth/token`, {
+  const res = await fetchWithTimeout(`${BASE_URL}/auth/token`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -32,7 +48,7 @@ export async function resolvePortalByDomain(
   pais?: string;
 } | null> {
   const url = `${BASE_URL}/portales/?dominio=${encodeURIComponent(baseDomain)}`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new APIMedialogError(res.status, 'Error resolving portal');
@@ -102,7 +118,7 @@ export async function resolvePortalByDomain(
 }
 
 export async function grabarMedialog(token: string, payload: import('./types').GrabarMedialogPayload): Promise<number> {
-  const res = await fetch(`${BASE_URL}/medialogs/`, {
+  const res = await fetchWithTimeout(`${BASE_URL}/medialogs/`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -123,7 +139,7 @@ export async function grabarMedialog(token: string, payload: import('./types').G
 
 export async function healthCheck(): Promise<boolean> {
   try {
-    const res = await fetch(`${BASE_URL}/health`, { method: 'GET' });
+    const res = await fetchWithTimeout(`${BASE_URL}/health`, { method: 'GET' });
     return res.ok;
   } catch {
     return false;
@@ -171,7 +187,7 @@ export async function healthCheck(): Promise<boolean> {
 
       const url = `${BASE_URL}/emisiones/emisora/${emisora}?fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`;
 
-      const res = await fetch(url, {
+      const res = await fetchWithTimeout(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -234,7 +250,7 @@ export async function healthCheck(): Promise<boolean> {
         const urlBusqueda = `${BASE_URL}/medialogs/?${params.toString()}`;
         console.log(`[PortalScrapper] Búsqueda URL ${emisoraParam ? 'con' : 'sin'} emisora: ${urlBusqueda}`);
 
-        const res = await fetch(urlBusqueda, {
+        const res = await fetchWithTimeout(urlBusqueda, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) {
@@ -295,7 +311,7 @@ export async function healthCheck(): Promise<boolean> {
         const urlBusqueda = `${BASE_URL}/medialogs/?${params.toString()}`;
         console.log(`[PortalScrapper] Búsqueda título ${emisoraParam ? 'con' : 'sin'} emisora: ${urlBusqueda}`);
 
-        const res = await fetch(urlBusqueda, {
+        const res = await fetchWithTimeout(urlBusqueda, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) {
@@ -374,7 +390,7 @@ export async function healthCheck(): Promise<boolean> {
         tipo,
       };
 
-      const res = await fetch(`${BASE_URL}/relaciones/medialogs`, {
+      const res = await fetchWithTimeout(`${BASE_URL}/relaciones/medialogs`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

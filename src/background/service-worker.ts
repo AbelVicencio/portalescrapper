@@ -14,7 +14,22 @@ async function connectToSidePanel() {
   return port;
 }
 
+const HANDLED_MESSAGE_TYPES = [
+  'SAVE_ARTICLE',
+  'GET_ALL_ARTICLES',
+  'DELETE_ARTICLE',
+  'CLEAR_ALL',
+  'EXPORT_JSON',
+  'EXPORT_CSV',
+  'GRABAR_API',
+  'EXTRACT_ARTICLE'
+];
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || !HANDLED_MESSAGE_TYPES.includes(msg.type)) {
+    return false; // Evita mantener abierto el puerto de forma indefinida para otros contextos
+  }
+
   (async () => {
     try {
       switch (msg.type) {
@@ -59,7 +74,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           // Forward to active content script tab
           const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
           if (tab?.id) {
-            chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_NOW' });
+            chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_NOW' }).catch(() => {});
           }
           sendResponse({ ok: true });
           break;

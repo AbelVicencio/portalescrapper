@@ -12,23 +12,23 @@
     <!-- LOGIN SCREEN -->
     <div id="login-screen">
       <header>
-        <h1>📰 PortalScrapper <span id="login-version">v1.0.76</span></h1>
+        <h1>📰 PortalScrapper <span id="login-version">v1.0.80</span></h1>
       </header>
       <div class="login-box">
         <h3>Iniciar Sesión — API Medialog</h3>
-        <div class="field">
-          <div>
-            <div class="label">Usuario</div>
-            <input id="login-user" placeholder="usuario">
-          </div>
+        <div class="login-field">
+          <div class="label">Usuario</div>
+          <input id="login-user" placeholder="usuario">
         </div>
-        <div class="field">
-          <div>
-            <div class="label">Contraseña</div>
-            <input id="login-pass" type="password" placeholder="••••••••">
-          </div>
+        <div class="login-field">
+          <div class="label">Contraseña</div>
+          <input id="login-pass" type="password" placeholder="••••••••">
         </div>
-        <button id="btn-login">🔑 Ingresar</button>
+        <div class="remember-me">
+          <input type="checkbox" id="login-remember" checked>
+          <label for="login-remember">Recordar credenciales</label>
+        </div>
+        <button id="btn-login" style="width: 100%; max-width: 280px; padding: 8px;">🔑 Ingresar</button>
         <div id="login-error" class="error"></div>
       </div>
     </div>
@@ -102,8 +102,8 @@
           <input id="evento" type="number" value="1" disabled>
         </div>
         <div>
-          <div class="label">Fecha (ISO)</div>
-          <input id="fecha" placeholder="2026-05-20T14:30:00">
+          <div class="label">Fecha publicación</div>
+          <input id="fecha_transcripcion" placeholder="2026-05-20T14:30:00">
         </div>
       </div>
 
@@ -115,6 +115,10 @@
         <div>
           <div class="label">Autor</div>
           <input id="autor" placeholder="Autor">
+        </div>
+        <div>
+          <div class="label">Fecha grabación</div>
+          <input id="fecha" placeholder="Auto" readonly style="background-color: var(--bg-tertiary, #222); color: #888;" title="Se generará al grabar">
         </div>
       </div>
 

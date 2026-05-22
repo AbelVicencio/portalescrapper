@@ -329,6 +329,7 @@ function populateUI(article: Partial<NewsArticle>) {
   setVal('portal', String(article.portal ?? article.pendiente ?? ''));
   setVal('emision', String(article.emision || 4659889));
   setVal('fecha', article.fecha || '');
+  setVal('fecha_transcripcion', article.fecha_transcripcion || '');
   setVal('dbRecordId', String(article.dbRecordId || ''));
   setVal('medio', article.medio || '');
   setVal('autor', article.autor || '');
@@ -350,7 +351,8 @@ function readFormIntoArticle(): NewsArticle {
     urlWithParams: getVal('url'),
     emisora: parseInt(getVal('emisora'), 10) || 0,
     emision: parseInt(getVal('emision'), 10) || 4659889,
-    fecha: toMexicoCityLocalISO(getVal('fecha') || now),
+    fecha: currentArticle.fecha || toMexicoCityLocalISO(now),
+    fecha_transcripcion: toMexicoCityLocalISO(getVal('fecha_transcripcion') || getVal('fecha') || now),
     usuario: currentUser || 'anon',
     evento: 1,
     superabstract: getVal('superabstract'),
@@ -486,12 +488,12 @@ async function autoResolveEmisora(url: string) {
       updatePortalHeader();
 
       // Resolver Emisión automáticamente (siempre, para que se actualice si el usuario cambió Emisora)
-      if (result.emisora && currentArticle.fecha) {
+      if (result.emisora && currentArticle.fecha_transcripcion) {
         const emisionInput = el('emision') as HTMLInputElement | null;
       const emision = await resolveEmisionPorEmisoraYFecha(
         currentToken!,
         result.emisora,
-        currentArticle.fecha
+        currentArticle.fecha_transcripcion
       );
         if (emision && emisionInput) {
           emisionInput.value = String(emision);
@@ -576,7 +578,7 @@ async function handleGrabarAPI() {
   const duplicadoId = await buscarMedialogDuplicado(
     currentToken!,
     article.emisora || 0,
-    article.fecha || '',
+    article.fecha_transcripcion || '',
     article.superabstract || '',
     article.url || article.urlWithParams || ''
   );
@@ -593,6 +595,7 @@ async function handleGrabarAPI() {
   }
 
   // 1) Save local draft (solo si NO es duplicado)
+  article.fecha = toMexicoCityLocalISO(new Date()); // Update recording date exactly at save time
   article.status = 'draft';
   article.usuario = currentUser!;
   await storage.saveArticle(article);
@@ -623,6 +626,7 @@ async function handleGrabarAPI() {
     emisora: article.emisora,
     emision: article.emision,
     fecha: article.fecha,
+    fecha_transcripcion: article.fecha_transcripcion,
     usuario: article.usuario,
     evento: article.evento,
     superabstract: article.superabstract.slice(0, 200),
@@ -674,7 +678,7 @@ async function handleGrabarAPI() {
             currentToken!,
             dbId,
             clasificacion,
-            article.fecha || payload.fecha,
+            article.fecha || payload.fecha || '',
             'R'
           );
         }
@@ -713,8 +717,8 @@ function loadArticleIntoUI(article: NewsArticle) {
   currentArticle = { ...article };
 
   // Normalizamos la fecha al cargar desde historial
-  if (currentArticle.fecha) {
-    currentArticle.fecha = toMexicoCityLocalISO(currentArticle.fecha);
+  if (currentArticle.fecha_transcripcion) {
+    currentArticle.fecha_transcripcion = toMexicoCityLocalISO(currentArticle.fecha_transcripcion);
   }
 
   if (currentArticle.texto) {
@@ -734,10 +738,15 @@ function setupSidePanelMessageListener() {
       currentArticle = { ...currentArticle, ...msg.payload };
       if (!currentArticle.id) currentArticle.id = crypto.randomUUID();
 
+      if (msg.payload.fecha) {
+        currentArticle.fecha_transcripcion = msg.payload.fecha;
+        delete currentArticle.fecha;
+      }
+
       // Normalización
-      if (currentArticle.fecha) {
-        currentArticle.fecha = toMexicoCityLocalISO(
-          (currentArticle.fecha as string).replace(/\|.*/g, '').trim()
+      if (currentArticle.fecha_transcripcion) {
+        currentArticle.fecha_transcripcion = toMexicoCityLocalISO(
+          (currentArticle.fecha_transcripcion as string).replace(/\|.*/g, '').trim()
         );
       }
       if (currentArticle.texto) {
@@ -775,6 +784,23 @@ function setupSidePanelMessageListener() {
   });
 }
 
+async function loadRememberedCredentials() {
+  const creds: any = await chrome.storage.local.get(['remembered_user', 'remembered_pass', 'remembered_enabled']);
+  const userEl = el('login-user') as HTMLInputElement | null;
+  const passEl = el('login-pass') as HTMLInputElement | null;
+  const rememberEl = el('login-remember') as HTMLInputElement | null;
+
+  if (creds.remembered_enabled) {
+    if (userEl && creds.remembered_user) userEl.value = creds.remembered_user;
+    if (passEl && creds.remembered_pass) passEl.value = creds.remembered_pass;
+    if (rememberEl) rememberEl.checked = true;
+  } else {
+    if (rememberEl) rememberEl.checked = false;
+    if (userEl && creds.remembered_user) userEl.value = creds.remembered_user;
+    if (passEl) passEl.value = '';
+  }
+}
+
 async function handleLogin() {
   const user = (el('login-user') as HTMLInputElement).value.trim();
   const pass = (el('login-pass') as HTMLInputElement).value;
@@ -792,6 +818,22 @@ async function handleLogin() {
     const sess = await getCurrentUser();
     currentToken = sess?.token || null;
     (el('logged-user') as HTMLElement).textContent = currentUser;
+
+    // Guardar o limpiar credenciales recordadas
+    const rememberChk = el('login-remember') as HTMLInputElement | null;
+    if (rememberChk && rememberChk.checked) {
+      await chrome.storage.local.set({
+        remembered_user: user,
+        remembered_pass: pass,
+        remembered_enabled: true
+      });
+    } else {
+      await chrome.storage.local.set({
+        remembered_enabled: false
+      });
+      await chrome.storage.local.remove(['remembered_pass']);
+    }
+
     showScreen('main');
     await renderHistory();
   } else {
@@ -804,6 +846,7 @@ async function handleLogout() {
   currentUser = null;
   currentToken = null;
   showScreen('login');
+  await loadRememberedCredentials();
 }
 
 async function initMainUI() {
@@ -840,7 +883,7 @@ async function initMainUI() {
       try {
         if (!(await ensureValidSession())) return;
         if (!currentToken) return;
-        const fecha = (el('fecha') as HTMLInputElement | null)?.value;
+        const fecha = (el('fecha_transcripcion') as HTMLInputElement | null)?.value;
         const newEmisora = parseInt(emisoraInputForListener.value, 10);
         const emisionInput = el('emision') as HTMLInputElement | null;
         if (newEmisora > 0 && fecha && emisionInput) {
@@ -860,7 +903,7 @@ async function initMainUI() {
   }
 
   // Normalizar fecha a hora CDMX cuando el usuario la edita manualmente
-  const fechaInput = el('fecha') as HTMLInputElement | null;
+  const fechaInput = el('fecha_transcripcion') as HTMLInputElement | null;
   if (fechaInput) {
     fechaInput.addEventListener('blur', () => {
       if (fechaInput.value) {
@@ -868,7 +911,7 @@ async function initMainUI() {
         if (normalized !== fechaInput.value) {
           fechaInput.value = normalized;
         }
-        currentArticle.fecha = normalized;
+        currentArticle.fecha_transcripcion = normalized;
       }
     });
   }
@@ -947,12 +990,31 @@ async function init() {
     await initMainUI();
   } else {
     showScreen('login');
+
+    await loadRememberedCredentials();
+
     const loginBtn = el('btn-login') as HTMLButtonElement | null;
-    if (loginBtn) loginBtn.onclick = handleLogin;
+    if (loginBtn) {
+      loginBtn.onclick = async () => {
+        loginBtn.disabled = true;
+        try {
+          await handleLogin();
+        } finally {
+          loginBtn.disabled = false;
+        }
+      };
+    }
     const loginPass = el('login-pass') as HTMLInputElement | null;
     if (loginPass) {
-      loginPass.addEventListener('keydown', (ev: KeyboardEvent) => {
-        if (ev.key === 'Enter') handleLogin();
+      loginPass.addEventListener('keydown', async (ev: KeyboardEvent) => {
+        if (ev.key === 'Enter') {
+          if (loginBtn) loginBtn.disabled = true;
+          try {
+            await handleLogin();
+          } finally {
+            if (loginBtn) loginBtn.disabled = false;
+          }
+        }
       });
     }
   }
