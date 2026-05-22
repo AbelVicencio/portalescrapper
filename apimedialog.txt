@@ -1,0 +1,80 @@
+// API Medialog v2.2.1 - Ultimate AI Developer Guide (Zero-shot compression)
+// Docs: La documentación interactiva (Scalar) en `/docs`. Soporte de OpenApi 3.1.
+// BaseURL: **Base URL:** `https://api.medialog.com.mx/v1`
+// Auth: JWT (OAuth2), X-API-Key (Permanente), X-Internal-App-ID (Sistema/Orquestación).
+//       - Flujo Humano: POST /auth/token (Basic Auth) para obtener JWT.
+//       - Flujo S2S: Header `X-API-Key: {key}`.
+//       - Orquestación: Header `X-Internal-App-ID: {service_name}` (Auth: SISTEMA, bypass rate limits).
+// Response: { "status": "success"|"error", "message": str, "data": Payload, "performance": {opt} }
+// Paginacion: { registros: [], paginacion: { pagina_actual, tamano_pagina, total_registros, total_paginas, tiene_siguiente } }
+// Documentation Standard: Todos los endpoints DEBEN documentar en Scalar (via Query(description=...)) 
+//                       la lista completa de campos disponibles en `fields` y opciones en `orden`.
+
+
+// --- TIPOS Y FILTROS BASE ---
+type BaseFilters = {
+    fecha_inicio: string /*ISO 8601 o YYYY-MM-DD*/,
+    fecha_fin: string /*ISO 8601 o YYYY-MM-DD*/,
+    fields: string /*Campos proyeccion separados por coma. Ej: nota.id,nota.encabezado*/,
+    orden: string /*Campo y direccion. Ej: fecha DESC, relevancia ASC*/,
+    pagina: int /*Default: 1*/,
+    tamano_pagina: int /*Default: 100*/
+}
+
+type Prensa = {id:int, encabezado:str, fecha:str, medio:str, seccion:str, pagina:str, relevancia:int, abstract:str, ocr:str, id_medio:int}
+type Medialog = {medialog:int, medialog_hash:str /*Hash MD5 para links*/, fecha:str, emisora:int, emision:int, abstract:str, duracion:str}
+type Transcripcion = {transcripcion_id:int, hash:str, +BaseFilters}
+type AnalisisIA = {sentimiento:float, cita:str, resumen:str, relevancia:int, cobertura:float, agresividad:float, topico:str, riesgo:float}
+
+// ==================== ENDPOINTS: AUTHENTICATION ====================
+POST /auth/token | Obtener acceso JWT (Intercambio Basic Auth) | Returns: { "access_token": string, "token_type": "bearer" }
+
+// ==================== ENDPOINTS: PRENSA (Medios Impresos) ====================
+GET /prensa/ | Listado notas (paginado) - Soporta SELECT dinámico vía `fields`. | Params: id:int?, tipos:str?, medio:str?, seccion:str?, generar_abstracts:bool?, limpiar_textos:bool?, refresh:bool?, +BaseFilters
+GET /prensa/clasificacion/{id} | Notas por clasificación | Params: tipos:str?, generar_abstracts:bool?, limpiar_textos:bool?, refresh:bool?, +BaseFilters
+GET /prensa/clasificacion/{id}/analisis | Notas con IA (sentimiento, relevancia) | Params: sentimiento_min:float?, cobertura_min:float?, procesar_ia:bool?, refresh:bool?, +BaseFilters
+GET /prensa/clasificacion/{id}/analisis/nucleado | Análisis narrativo IA agrupado | Params: precisiones:str? /*Refinar prompt*/, tipos:str?, refresh:bool?, +BaseFilters
+
+// ==================== ENDPOINTS: MEDIALOGS (Radio y TV) ====================
+GET /medialogs/notasb | Medialogs destacados (Notas B) | Params: top:int?, +BaseFilters
+GET /medialogs/hash/{medialog} | Obtener hash MD5 y metadatos de acceso de un registro | Params: medialog:int | Returns: {medialog:int, hash:str, url:str}
+GET /medialogs/clasificacion/{id} | Medialogs por clasificación | Params: tipo_emisora:string?, +BaseFilters
+GET /medialogs/clasificacion/{id}/analisis | Medialogs con IA | Params: sentimiento_min:float?, cobertura_min:float?, refresh:bool?, +BaseFilters
+GET /medialogs/clasificacion/{id}/analisis/nucleado | Análisis narrativo IA de Radio/TV | Params: precisiones:str?, refresh:bool?, +BaseFilters
+GET /medialogs/clasificacion/{id}/analisis/grafica | Visualizaciones: sismografo, crestas, calor, dashboard | Params: tipo:str, formato:svg|png|json, +BaseFilters
+POST /medialogs/ | Capturar registro de monitoreo electrónico | Body: {emisora:int, emision:int, fecha:ISO, usuario:str(20), evento:int, superabstract:str(200), logger?:smallint, transcriptor?:smallint, usuario_t?:str(20), fecha_log?:datetime, fecha_transcripcion?:datetime, abstract?:text, transcripcion?:text, analisis?:text, impacto?:smallint, pendiente?:smallint, duracion?:str(HH:MM:SS)} | Returns: {medialog:int, ...}
+
+// ==================== ENDPOINTS: RELACIONES (Vinculaciones Medialog ↔ Clasificación) ====================
+GET /relaciones/medialogs | Listado paginado de vinculaciones (filtro obligatorio por volumen) | Params: medialog:str? (CSV), clasificacion:int?, fecha_inicio:str?, fecha_fin:str?, pagina:int, tamano_pagina:int, orden:str?
+POST /relaciones/medialogs | Crear relación atómica (Medialog + Clasificación) | Body: {medialog:int, clasificacion:int, tipo:char(1), fecha:ISO} | Returns: {relacion:int, ...}
+
+// ==================== ENDPOINTS: PORTALES (Portales Informativos Web) ====================
+GET /portales/ | Listado paginado de portales informativos web | Params: portal:str? (CSV), dominio:str? (LIKE), nombre_portal:str? (LIKE), emisora:int?, pagina:int, tamano_pagina:int, orden:str
+POST /portales/ | Captura atómica de portal informativo | Body: {dominio:str, alcance:str(3), pais:str, estado:str, municipio:str, medio_relacionado:str, puntos_medio:float, tiraje:int, emisora:int, nombre_portal?:str, id_emisora_relacionada?:int, id_medio_relacionado?:int, es_periodico?:int} | Returns: {portal:int, dominio:str, ...}
+
+// ==================== ENDPOINTS: TRANSCRIPCIONES (Speech-to-Text) ====================
+GET /transcripciones/ | Listado general paginado (Optimizado sub-segundo) | Params: emisora:str? (CSV), tipo:str? (CSV), +BaseFilters
+GET /transcripciones/{parametro} | Buscar por ID o Hash SHA-256 | Params: fields:str?
+GET /transcripciones/{id}/tarjeta | Generar tarjeta visual HTML (Motor de Fichas) | Params: plantilla:str? (default, densa, minima)
+GET /transcripciones/emision/{id} | Transcripciones por programa completo (Top 1000) | Params: +BaseFilters
+GET /transcripciones/clasificacion/{id} | Menciones por clasificación (Optimizado) | Params: emisora:int?, tipo:str?, +BaseFilters
+GET /transcripciones/clasificacion/{id}/analisis/nucleado | Síntesis de menciones agrupadas | Params: precisiones:str?, refresh:bool?, +BaseFilters
+GET /transcripciones/clasificacion/{id}/analisis/grafica | Joyplot/Heatmap de menciones | Params: tipo:str, formato:svg|png|json, +BaseFilters
+
+// ==================== ENDPOINTS: CATALOGOS, EMISORAS Y MEDIOS ====================
+GET /emisoras/activas | Directorio de emisoras operativas | Params: +BaseFilters
+GET /emisoras/{id} | Detalle de emisora (frecuencia, banda, logotipo) | Params: +BaseFilters
+GET /medios/{tipo} | Medios impresos por categoría (Nacional, Local) | Params: +BaseFilters
+GET /catalogos/tiposnotasprensa | Tipos de nota y factores de relevancia | Params: +BaseFilters
+
+// ==================== ENDPOINTS: EMISIONES (Programas) ====================
+GET /emisiones/dia/{fecha} | Parrilla de programación por día | Params: fecha:str, emisora_id:int?, +BaseFilters
+
+// ==================== ENDPOINTS: SÍNTESIS Y REPORTES ====================
+POST /sintesis/generar | Generador orquestado de reportes (HTML/DOCX) | Params: Body:{plantilla:JSON, formato:str}
+PUT /reportes/exclusiones/{tipo} | Gestionar exclusiones de monitoreo | Params: tipo:str, Body:JSON
+
+// ==================== ENDPOINTS: SISTEMA ====================
+GET /health | Estatus de salud (API, DB, Version) | Returns: {status: success, data: {version: 2.2.1}}
+GET /docs | Interfaz Scalar interactiva profesional. | Returns: HTML
+GET /health | Verificación de salud de la API (v1) |  | Returns: Health

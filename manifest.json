@@ -1,0 +1,67 @@
+{
+  "manifest_version": 3,
+  "name": "PortalScrapper",
+  "version": "1.0.51",
+  "description": "Side Panel extension for passive capture of news articles from major portals with direct persistence to API Medialog.",
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "activeTab",
+    "tabs",
+    "downloads"
+  ],
+  "host_permissions": [
+    "https://*.wsj.com/*",
+    "https://*.nytimes.com/*",
+    "https://*.reuters.com/*",
+    "https://*.ft.com/*",
+    "https://*.pressreader.com/*",
+    "https://*.washingtonpost.com/*",
+    "https://*.elpais.com/*",
+    "https://*.reforma.com/*",
+    "https://*.milenio.com/*",
+    "https://api.medialog.com.mx/*"
+  ],
+  "side_panel": {
+    "default_path": "src/sidepanel/sidepanel.html"
+  },
+  "background": {
+    "service_worker": "dist/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.wsj.com/*",
+        "https://*.nytimes.com/*",
+        "https://*.reuters.com/*",
+        "https://*.ft.com/*",
+        "https://*.pressreader.com/*",
+        "https://*.washingtonpost.com/*",
+        "https://*.elpais.com/*",
+        "https://*.reforma.com/*",
+        "https://*.milenio.com/*"
+      ],
+      "js": [
+        "dist/content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/sidepanel/sidepanel.html",
+        "src/sidepanel/sidepanel.css",
+        "dist/sidepanel.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "action": {
+    "default_title": "PortalScrapper - Abrir Side Panel"
+  }
+}

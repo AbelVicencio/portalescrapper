@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+
+# Build output
+# We commit dist/ so the extension can be loaded directly with "Load unpacked"
+# dist/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Windows
+*.exe
+*.msi
+
+# Misc
+*.tgz
+*.tar.gz
+*.zip
+*.rar
