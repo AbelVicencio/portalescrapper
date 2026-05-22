@@ -184,17 +184,61 @@
       name: "PressReader",
       hostPatterns: ["pressreader.com"],
       selectors: {
-        title: ".article-title h1, .article-headline, h1",
-        author: ".article-author, .byline",
-        date: ".article-date, time[datetime]",
-        content: ".article-body p, .article-text p",
+        // PressReader es una SPA — estas clases se renderizan dinámicamente.
+        // El Text View es el más accesible para extracción.
+        title: [
+          ".article-title",
+          ".v-textview h1",
+          ".text-view-title",
+          ".article-headline",
+          '[class*="articleTitle"]',
+          '[class*="ArticleTitle"]',
+          ".content-title",
+          "h1"
+        ].join(", "),
+        author: [
+          ".article-author",
+          ".v-textview .byline",
+          '[class*="articleAuthor"]',
+          '[class*="author"]',
+          ".byline"
+        ].join(", "),
+        date: [
+          ".article-date",
+          ".v-textview .date",
+          '[class*="articleDate"]',
+          "time[datetime]"
+        ].join(", "),
+        content: [
+          ".v-textview .body p",
+          ".v-textview p",
+          ".text-view-content p",
+          ".article-body p",
+          ".article-text p",
+          '[class*="articleBody"] p',
+          '[class*="ArticleBody"] p',
+          '[class*="article-content"] p',
+          ".content-body p"
+        ].join(", "),
         paywall: ""
       }
     }
   };
   function querySelectorText(selector) {
-    const el = document.querySelector(selector);
-    return (el?.textContent || "").trim();
+    if (!selector) return "";
+    const parts = selector.split(",").map((s) => s.trim()).filter(Boolean);
+    for (const part of parts) {
+      try {
+        const el = document.querySelector(part);
+        if (el) {
+          let text = (el.textContent || "").trim();
+          text = text.replace(/^Article(?=[A-ZÁÉÍÓÚÑÜ“”"'])/, "");
+          if (text.length > 0) return text;
+        }
+      } catch {
+      }
+    }
+    return "";
   }
   function collectText(selector) {
     const nodes = document.querySelectorAll(selector);
@@ -223,6 +267,277 @@
     return result;
   }
 
+  // src/extractors/generic.ts
+  var NOISE_PATTERNS = /nav|sidebar|footer|header|menu|breadcrumb|comment|social|share|related|widget|promo|advert|ad-|sponsor|newsletter|popup|modal|cookie|consent|signup|login|toolbar|pagination|carousel|gallery-thumbs|trending|most-read|also-read|recomend/i;
+  var ARTICLE_CONTAINER_SELECTORS = [
+    // Estándar HTML5 semántico
+    "article",
+    '[role="article"]',
+    "main",
+    '[role="main"]',
+    // Microdata / Schema.org
+    '[itemprop="articleBody"]',
+    '[itemtype*="schema.org/Article"]',
+    '[itemtype*="schema.org/NewsArticle"]',
+    // Patrones de CMS comunes (WordPress, Drupal, etc.)
+    ".article-body",
+    ".article-content",
+    ".article__body",
+    ".article__content",
+    ".story-body",
+    ".story-content",
+    ".post-body",
+    ".post-content",
+    ".entry-content",
+    ".content-body",
+    ".content-article",
+    ".field-body",
+    ".text-article",
+    ".nota-body",
+    ".nota-content",
+    // Patrones genéricos con data attributes
+    '[data-testid*="article"]',
+    '[data-testid*="story"]',
+    '[data-component="text-block"]',
+    // Selectores específicos de PressReader y visor de periódicos
+    ".article-text",
+    ".article-body-text",
+    ".reading-body"
+  ];
+  var TITLE_SELECTORS = [
+    'h1[itemprop="headline"]',
+    'h1[data-testid="headline"]',
+    'h1[data-testid*="title"]',
+    "article h1",
+    "main h1",
+    '[role="main"] h1',
+    ".article-title h1",
+    ".article-headline",
+    ".story-headline",
+    ".headline",
+    "h1.title",
+    "h1.entry-title",
+    "h1.post-title",
+    "h1"
+  ];
+  var AUTHOR_SELECTORS = [
+    '[rel="author"]',
+    '[itemprop="author"] [itemprop="name"]',
+    '[itemprop="author"]',
+    '[data-testid="author-name"]',
+    '[data-testid*="byline"]',
+    '[data-testid*="author"]',
+    'a[href*="/author/"]',
+    'a[href*="/authors/"]',
+    'a[href*="/autor/"]',
+    ".author-name",
+    ".author",
+    ".byline-name",
+    ".byline a",
+    ".byline",
+    ".article-author",
+    ".story-author",
+    ".post-author",
+    ".writer-name",
+    ".contributor-name",
+    'span[class*="author"]',
+    'span[class*="byline"]',
+    'p[class*="author"]'
+  ];
+  var DATE_SELECTORS = [
+    "time[datetime]",
+    '[itemprop="datePublished"]',
+    '[data-testid*="timestamp"]',
+    '[data-testid*="date"]',
+    ".article-date",
+    ".story-date",
+    ".publish-date",
+    ".published-date",
+    ".post-date",
+    ".date-published",
+    ".article-timestamp",
+    ".timestamp",
+    'span[class*="date"]'
+  ];
+  function queryFirst(selectors) {
+    for (const sel of selectors) {
+      try {
+        const el = document.querySelector(sel);
+        if (el) {
+          let text = (el.textContent || "").trim();
+          text = text.replace(/^Article(?=[A-ZÁÉÍÓÚÑÜ“”"'])/, "");
+          if (text.length > 0) return text;
+        }
+      } catch {
+      }
+    }
+    return "";
+  }
+  function queryDate() {
+    const timeEl = document.querySelector("time[datetime]");
+    if (timeEl) {
+      const dt = timeEl.getAttribute("datetime");
+      if (dt) return dt;
+      const text = (timeEl.textContent || "").trim();
+      if (text) return text;
+    }
+    const itempropEl = document.querySelector('[itemprop="datePublished"]');
+    if (itempropEl) {
+      const content = itempropEl.getAttribute("content") || itempropEl.getAttribute("datetime");
+      if (content) return content;
+      const text = (itempropEl.textContent || "").trim();
+      if (text) return text;
+    }
+    for (const sel of DATE_SELECTORS.slice(2)) {
+      try {
+        const el = document.querySelector(sel);
+        if (el) {
+          const text = (el.textContent || "").trim();
+          if (text.length > 4) return text;
+        }
+      } catch {
+      }
+    }
+    return "";
+  }
+  function cleanDocumentTitle() {
+    const raw = document.title || "";
+    return raw.replace(/\s*[\|–—:·]\s*[^|–—:·]{2,40}$/g, "").replace(/\s*-\s*[^-]{2,40}$/g, "").trim();
+  }
+  function isNoiseNode(el) {
+    const id = (el.id || "").toLowerCase();
+    const cls = (el.className || "").toString().toLowerCase();
+    const role = (el.getAttribute("role") || "").toLowerCase();
+    if (NOISE_PATTERNS.test(id) || NOISE_PATTERNS.test(cls)) return true;
+    if (["navigation", "banner", "complementary", "contentinfo"].includes(role)) return true;
+    const tag = el.tagName.toLowerCase();
+    if (["nav", "footer", "aside", "header"].includes(tag)) return true;
+    return false;
+  }
+  function scoreContainer(el) {
+    if (isNoiseNode(el)) return -100;
+    const text = (el.textContent || "").trim();
+    const textLength = text.length;
+    if (textLength < 100) return -50;
+    const paragraphs = el.querySelectorAll("p");
+    const pCount = paragraphs.length;
+    const links = el.querySelectorAll("a");
+    const linkDensity = links.length / Math.max(pCount, 1);
+    const htmlLength = el.innerHTML.length;
+    const textRatio = htmlLength > 0 ? textLength / htmlLength : 0;
+    let score = Math.log(textLength) * 10;
+    score += pCount * 3;
+    score += textRatio * 30;
+    if (linkDensity > 3) score -= 20;
+    if (linkDensity > 6) score -= 30;
+    if (el.querySelector("time[datetime]")) score += 5;
+    if (el.querySelector("[itemprop]")) score += 5;
+    const tag = el.tagName.toLowerCase();
+    if (tag === "article") score += 25;
+    if (tag === "main") score += 15;
+    const cls = (el.className || "").toString().toLowerCase();
+    if (/article|story|content|body|post|entry|nota/.test(cls)) score += 15;
+    return score;
+  }
+  function findBestContainer() {
+    const candidates = [];
+    for (const sel of ARTICLE_CONTAINER_SELECTORS) {
+      try {
+        const els = document.querySelectorAll(sel);
+        for (const el of Array.from(els)) {
+          const score = scoreContainer(el);
+          if (score > 0) {
+            candidates.push({ element: el, score });
+          }
+        }
+      } catch {
+      }
+    }
+    if (candidates.length === 0) {
+      const divs = document.querySelectorAll("div, section");
+      for (const div of Array.from(divs)) {
+        const depth = getDepth(div);
+        if (depth < 2 || depth > 8) continue;
+        const score = scoreContainer(div);
+        if (score > 20) {
+          candidates.push({ element: div, score });
+        }
+      }
+    }
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0].element;
+  }
+  function getDepth(el) {
+    let depth = 0;
+    let current = el;
+    while (current && current !== document.documentElement) {
+      depth++;
+      current = current.parentElement;
+    }
+    return depth;
+  }
+  function extractCleanText(container) {
+    const blocks = [];
+    const walker = document.createTreeWalker(
+      container,
+      NodeFilter.SHOW_ELEMENT,
+      {
+        acceptNode: (node2) => {
+          const el = node2;
+          if (isNoiseNode(el)) return NodeFilter.FILTER_REJECT;
+          const tag = el.tagName.toLowerCase();
+          if (["p", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "figcaption"].includes(tag)) {
+            return NodeFilter.FILTER_ACCEPT;
+          }
+          if (tag === "div" && !el.querySelector("p")) {
+            const text = (el.textContent || "").trim();
+            if (text.length > 50) return NodeFilter.FILTER_ACCEPT;
+          }
+          return NodeFilter.FILTER_SKIP;
+        }
+      }
+    );
+    let node;
+    while (node = walker.nextNode()) {
+      const el = node;
+      const text = (el.textContent || "").trim();
+      if (text.length > 0) {
+        if (!blocks.includes(text)) {
+          blocks.push(text);
+        }
+      }
+    }
+    return blocks.join("\n\n");
+  }
+  function extractGeneric() {
+    const result = { method: "generic", confidence: 0 };
+    result.title = queryFirst(TITLE_SELECTORS) || cleanDocumentTitle() || void 0;
+    result.author = queryFirst(AUTHOR_SELECTORS) || void 0;
+    result.date = queryDate() || void 0;
+    const container = findBestContainer();
+    if (container) {
+      const text = extractCleanText(container);
+      if (text.length > 80) {
+        result.content = text;
+      }
+    }
+    const paywallHints = document.querySelectorAll(
+      '.paywall, .premium-wall, .subscription-wall, [class*="paywall"], [id*="paywall"], [data-testid*="paywall"], .regwall, [class*="barrier"], [class*="metered"]'
+    );
+    result.paywallDetected = paywallHints.length > 0;
+    if (result.title && result.content && result.content.length > 300) {
+      result.confidence = 0.6;
+    } else if (result.title && result.content) {
+      result.confidence = 0.45;
+    } else if (result.title) {
+      result.confidence = 0.3;
+    } else {
+      result.confidence = 0.1;
+    }
+    return result;
+  }
+
   // src/extractors/cascade.ts
   function runExtractionCascade() {
     const results = [];
@@ -232,6 +547,8 @@
     if (site.confidence > 0) results.push(site);
     const meta = extractMetaTags();
     if (meta.confidence > 0) results.push(meta);
+    const generic = extractGeneric();
+    if (generic.confidence > 0) results.push(generic);
     const merged = mergeResults(results);
     let overallMethod = "manual";
     let overallConfidence = 0;
@@ -264,7 +581,7 @@
   }
   function detectSite() {
     const host = getHostname();
-    const map = {
+    const known = {
       "wsj.com": "Wall Street Journal",
       "nytimes.com": "New York Times",
       "reuters.com": "Reuters",
@@ -275,8 +592,13 @@
       "reforma.com": "Reforma",
       "milenio.com": "Milenio"
     };
-    for (const [key, val] of Object.entries(map)) {
+    for (const [key, val] of Object.entries(known)) {
       if (host.includes(key)) return { site: key, name: val };
+    }
+    const pathname = window.location.pathname;
+    if (pathname.length > 1) {
+      const displayName = host.replace(/^(www|m|mobile|amp)\./, "").split(".")[0].replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      return { site: host, name: `${displayName} (gen\xE9rico)` };
     }
     return null;
   }

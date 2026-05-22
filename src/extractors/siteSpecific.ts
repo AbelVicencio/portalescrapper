@@ -94,18 +94,62 @@ export const SITE_CONFIGS: Record<string, SiteConfig> = {
     name: 'PressReader',
     hostPatterns: ['pressreader.com'],
     selectors: {
-      title: '.article-title h1, .article-headline, h1',
-      author: '.article-author, .byline',
-      date: '.article-date, time[datetime]',
-      content: '.article-body p, .article-text p',
+      // PressReader es una SPA — estas clases se renderizan dinámicamente.
+      // El Text View es el más accesible para extracción.
+      title: [
+        '.article-title',
+        '.v-textview h1',
+        '.text-view-title',
+        '.article-headline',
+        '[class*="articleTitle"]',
+        '[class*="ArticleTitle"]',
+        '.content-title',
+        'h1',
+      ].join(', '),
+      author: [
+        '.article-author',
+        '.v-textview .byline',
+        '[class*="articleAuthor"]',
+        '[class*="author"]',
+        '.byline',
+      ].join(', '),
+      date: [
+        '.article-date',
+        '.v-textview .date',
+        '[class*="articleDate"]',
+        'time[datetime]',
+      ].join(', '),
+      content: [
+        '.v-textview .body p',
+        '.v-textview p',
+        '.text-view-content p',
+        '.article-body p',
+        '.article-text p',
+        '[class*="articleBody"] p',
+        '[class*="ArticleBody"] p',
+        '[class*="article-content"] p',
+        '.content-body p',
+      ].join(', '),
       paywall: ''
     }
   }
 };
 
 function querySelectorText(selector: string): string {
-  const el = document.querySelector(selector);
-  return (el?.textContent || '').trim();
+  if (!selector) return '';
+  const parts = selector.split(',').map((s) => s.trim()).filter(Boolean);
+  for (const part of parts) {
+    try {
+      const el = document.querySelector(part);
+      if (el) {
+        let text = (el.textContent || '').trim();
+        // Limpiar prefijo de accesibilidad "Article" mal concatenado (ej: "ArticleReeves" -> "Reeves")
+        text = text.replace(/^Article(?=[A-ZÁÉÍÓÚÑÜ“”"'])/, '');
+        if (text.length > 0) return text;
+      }
+    } catch {}
+  }
+  return '';
 }
 
 function collectText(selector: string): string {

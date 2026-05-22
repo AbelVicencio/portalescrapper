@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PortalScrapper",
-  "version": "1.0.51",
+  "version": "1.0.60",
   "description": "Side Panel extension for passive capture of news articles from major portals with direct persistence to API Medialog.",
   "permissions": [
     "sidePanel",
@@ -11,15 +11,7 @@
     "downloads"
   ],
   "host_permissions": [
-    "https://*.wsj.com/*",
-    "https://*.nytimes.com/*",
-    "https://*.reuters.com/*",
-    "https://*.ft.com/*",
-    "https://*.pressreader.com/*",
-    "https://*.washingtonpost.com/*",
-    "https://*.elpais.com/*",
-    "https://*.reforma.com/*",
-    "https://*.milenio.com/*",
+    "https://*/*",
     "https://api.medialog.com.mx/*"
   ],
   "side_panel": {
@@ -32,15 +24,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://*.wsj.com/*",
-        "https://*.nytimes.com/*",
-        "https://*.reuters.com/*",
-        "https://*.ft.com/*",
-        "https://*.pressreader.com/*",
-        "https://*.washingtonpost.com/*",
-        "https://*.elpais.com/*",
-        "https://*.reforma.com/*",
-        "https://*.milenio.com/*"
+        "https://*/*"
       ],
       "js": [
         "dist/content.js"

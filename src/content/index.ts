@@ -8,7 +8,9 @@ function getHostname(): string {
 
 function detectSite(): { site: string; name: string } | null {
   const host = getHostname();
-  const map: Record<string, string> = {
+
+  // Portales conocidos con nombre curado
+  const known: Record<string, string> = {
     'wsj.com': 'Wall Street Journal',
     'nytimes.com': 'New York Times',
     'reuters.com': 'Reuters',
@@ -19,9 +21,23 @@ function detectSite(): { site: string; name: string } | null {
     'reforma.com': 'Reforma',
     'milenio.com': 'Milenio',
   };
-  for (const [key, val] of Object.entries(map)) {
+  for (const [key, val] of Object.entries(known)) {
     if (host.includes(key)) return { site: key, name: val };
   }
+
+  // Sitio desconocido — devolver resultado genérico para permitir extracción
+  // Solo en páginas que parecen tener contenido (no APIs, imágenes, etc.)
+  const pathname = window.location.pathname;
+  if (pathname.length > 1) {
+    // Generar un nombre legible a partir del hostname
+    const displayName = host
+      .replace(/^(www|m|mobile|amp)\./, '')
+      .split('.')[0]
+      .replace(/-/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase());
+    return { site: host, name: `${displayName} (genérico)` };
+  }
+
   return null;
 }
 

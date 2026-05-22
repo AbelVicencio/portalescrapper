@@ -20,7 +20,11 @@ body.light {
 }
 
 html, body {
-  min-width: 920px;   /* Abre el side panel casi al 50% en FHD (1920px). Doble del ancho habitual */
+  min-width: 320px;   /* Permitimos que sea elástico y se pueda achicar libremente */
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
 }
 
 body {

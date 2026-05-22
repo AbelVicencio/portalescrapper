@@ -6,6 +6,22 @@ import { login, logout, getCurrentUser } from '../api/auth';
 import { resolvePortalByDomain, resolveEmisionPorEmisoraYFecha, grabarMedialog, buscarMedialogDuplicado, crearRelacionMedialog, type GrabarMedialogPayload } from '../api/client';
 import { PORTAL_CLASSIFICATIONS } from '../config/portalClassifications';
 
+// ============================================================================
+// Inicialización dinámica y elástica del ancho del Side Panel
+// Abre al 40% del ancho disponible de la pantalla, luego se vuelve 100% elástico.
+// ============================================================================
+(function initElasticSizing() {
+  const initialWidth = Math.max(380, Math.round(window.screen.availWidth * 0.4));
+  document.documentElement.style.minWidth = `${initialWidth}px`;
+  document.body.style.minWidth = `${initialWidth}px`;
+
+  setTimeout(() => {
+    document.documentElement.style.minWidth = '320px';
+    document.body.style.minWidth = '320px';
+    console.log(`[PortalScrapper] Sidepanel set to elastic (min 320px), opened at ${initialWidth}px`);
+  }, 600);
+})();
+
 let currentArticle: Partial<NewsArticle> = {};
 let currentUser: string | null = null;
 let currentToken: string | null = null;

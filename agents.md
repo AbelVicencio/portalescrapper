@@ -97,9 +97,35 @@ Chrome/Edge extension (Manifest V3) with a **Side Panel** UI for passive news ar
 ## 🔄 Common Tasks
 
 ### Adding a new news portal
-1. Add the domain to `host_permissions` and `content_scripts.matches` in `manifest.json`.
-2. Add a new entry in `SITE_CONFIGS` in `src/extractors/siteSpecific.ts`.
-3. (Optional) Add automatic classifications in `src/config/portalClassifications.ts`.
+The extension now injects into **all HTTPS sites** (`manifest.json` uses `https://*/*`). This means:
+1. **No need to modify `manifest.json`** for new portals — the content script is already injected everywhere.
+2. **Test with the generic extractor first** — navigate to an article and trigger extraction. If the generic provides ≥80% quality, you're done.
+3. **Only if needed**, add a new entry in `SITE_CONFIGS` in `src/extractors/siteSpecific.ts` with fine-tuned CSS selectors.
+4. (Optional) Add automatic classifications in `src/config/portalClassifications.ts`.
+
+### Portal Training Procedure (iterative)
+When the generic extractor isn't enough for a specific portal:
+
+1. **Navigate** to a representative article on the target portal.
+2. **Inspect the DOM** — check for:
+   - Does the site have JSON-LD `<script type="application/ld+json">`? (If yes, Layer 1 handles it)
+   - What CSS selectors identify: title (`h1`), author, date (`time[datetime]`), content body?
+   - Is there a paywall element?
+3. **Open the Side Panel** and trigger Re-extract. Check what the cascade already captures.
+4. **If fields are missing**, add the portal to `SITE_CONFIGS` with specific selectors.
+5. Build (`npm run build`) and reload the extension.
+
+### The 5-Layer Extraction Cascade
+```
+JSON-LD (0.95) → Site-Specific (0.85) → Meta Tags (0.75) → Generic (0.50) → Manual (0.0)
+```
+- **JSON-LD**: Most stable. Check `<script type="application/ld+json">` for `NewsArticle`/`Article` schemas.
+- **Site-Specific**: CSS selectors curated per portal. Only applies to registered portals in `SITE_CONFIGS`.
+- **Meta Tags**: OpenGraph (`og:title`, `og:description`), Twitter Cards, `article:published_time`.
+- **Generic** (`src/extractors/generic.ts`): Text density heuristics, universal selectors (`article`, `main`, `[itemprop="articleBody"]`), automatic noise filtering. Works on **any** news site.
+- **Manual**: User fills in the form directly.
+
+The merge rule is "first non-null value wins" — higher layers take priority.
 
 ### Adding automatic classifications for a portal
 Edit `src/config/portalClassifications.ts`:
@@ -107,13 +133,15 @@ Edit `src/config/portalClassifications.ts`:
 ```ts
 export const PORTAL_CLASSIFICATIONS: Record<number, number[]> = {
   4014: [25609],           // El País
-  1250: [3001, 3002],      // Another portal
+  10725: [25872],          // Financial Times (PressReader)
 };
 ```
 
 ### Fixing a broken selector
 - Update the relevant entry in `SITE_CONFIGS`.
 - Prefer semantic or `data-testid` selectors.
+- For SPA sites (like PressReader), use `[class*="pattern"]` wildcards since exact class names may change.
+- **Selector Priority (Crucial)**: `querySelectorText` evaluates comma-separated selectors sequentially from left to right. This ensures that more specific selectors (e.g., `.v-textview h1`) are evaluated and matched first, preventing loose fallbacks (e.g., naked `h1`) from matching random pagination elements (like "Prev") that appear earlier in the DOM. Always place more specific selectors first.
 
 ### Saving a medialog + creating relations
 1. Call `grabarMedialog(...)`.
@@ -126,6 +154,8 @@ export const PORTAL_CLASSIFICATIONS: Record<number, number[]> = {
 - **Date Handling**: The Medialog backend expects `fecha` in **Mexico City local time**, not UTC.
 - **Abstract Field**: Must always contain the original URL (used for remote duplicate search).
 - **Session Expiry**: Always check `getCurrentUser()` before network calls. On 401, log out cleanly.
+- **PressReader is a SPA**: The HTML source is empty — all content is JavaScript-rendered. Our content script runs at `document_idle` and sees the rendered DOM, but `MutationObserver` delays may be needed for dynamic article loading.
+- **Generic extractor on non-news sites**: The content script injects on ALL HTTPS sites now. It's passive (only extracts on request), but `detectSite()` will return a generic result for any page with a path. This is by design.
 
 ## 🗂️ Related Project
 

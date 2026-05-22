@@ -449,7 +449,9 @@
   // src/config/portalClassifications.ts
   var PORTAL_CLASSIFICATIONS = {
     // El País (portal 4014)
-    4014: [25609]
+    4014: [25609],
+    // Financial Times - PressReader (portal 10725)
+    10725: [25872]
     // Ejemplos de otros portales (agrega los que necesites):
     // 1234: [1001, 1002],
     // 9999: [500],
@@ -457,6 +459,16 @@
   };
 
   // src/sidepanel/sidepanel.ts
+  (function initElasticSizing() {
+    const initialWidth = Math.max(380, Math.round(window.screen.availWidth * 0.4));
+    document.documentElement.style.minWidth = `${initialWidth}px`;
+    document.body.style.minWidth = `${initialWidth}px`;
+    setTimeout(() => {
+      document.documentElement.style.minWidth = "320px";
+      document.body.style.minWidth = "320px";
+      console.log(`[PortalScrapper] Sidepanel set to elastic (min 320px), opened at ${initialWidth}px`);
+    }, 600);
+  })();
   var currentArticle = {};
   var currentUser = null;
   var currentToken = null;
