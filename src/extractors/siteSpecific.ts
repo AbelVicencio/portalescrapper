@@ -68,6 +68,17 @@ export const SITE_CONFIGS: Record<string, SiteConfig> = {
       paywall: '.a_tp, #ctn_freemium_article, .mura-wall, .paywall'
     }
   },
+  'eluniversal.com.mx': {
+    name: 'El Universal',
+    hostPatterns: ['eluniversal.com.mx'],
+    selectors: {
+      title: 'h1.title, h1.article-title',
+      author: '.sc__author-nota, .author',
+      date: 'time[datetime], .sc__author--date',
+      content: '.sc__font-paragraph, .story-content p, article p',
+      paywall: '.paywall, .premium-banner'
+    }
+  },
   'reforma.com': {
     name: 'Reforma',
     hostPatterns: ['reforma.com'],
@@ -517,6 +528,55 @@ export function cleanWSJText(text: string): string {
     .join('\n\n');
 }
 
+export function cleanElUniversalText(text: string): string {
+  const paragraphs = text.split('\n\n').map(p => p.trim()).filter(Boolean);
+  
+  const filtered = paragraphs.filter(p => {
+    const lower = p.toLowerCase();
+    
+    // Quitar marcas explícitas de publicidad
+    if (p === '[Publicidad]' || lower === '[publicidad]') return false;
+    
+    // Quitar spam de Whatsapp y boletines
+    if (lower.includes('únete a nuestro canal') && lower.includes('whatsapp')) return false;
+    if (lower.includes('recibir directo en tu correo') && lower.includes('suscríbete')) return false;
+    if (lower.includes('recibe las noticias más relevantes del día')) return false;
+    
+    // Quitar hipervínculos cruzados como "Lee también"
+    if (lower.startsWith('lee también') || 
+        lower.startsWith('lee aquí la nota completa') || 
+        lower.startsWith('lee aqui la nota completa')) {
+      return false;
+    }
+    
+    return true;
+  });
+
+  if (filtered.length === 0) return '';
+
+  // Cortar al final en la firma "Con información de..." o similares
+  let endIndex = filtered.length - 1;
+  for (let i = filtered.length - 1; i >= 0; i--) {
+    const p = filtered[i];
+    const lower = p.toLowerCase();
+    
+    if (lower.startsWith('con información de')) {
+      endIndex = i - 1;
+      break;
+    }
+    
+    // Omitir iniciales cortas finales (ej. "apr", "rmlgv") de las agencias/editores
+    // Si encontramos un párrafo real (> 25 caracteres), ahí detenemos la búsqueda hacia atrás
+    if (p.length > 25) {
+      endIndex = i;
+      break;
+    }
+  }
+
+  if (endIndex < 0) return '';
+  return filtered.slice(0, endIndex + 1).join('\n\n');
+}
+
 export function extractSiteSpecific(host: string): ExtractorResult {
   const result: ExtractorResult = { method: 'site-specific', confidence: 0 };
   const entry = Object.values(SITE_CONFIGS).find((cfg) =>
@@ -535,6 +595,9 @@ export function extractSiteSpecific(host: string): ExtractorResult {
   }
   if (host.includes('bloomberg.com') && contentText) {
     contentText = cleanBloombergText(contentText);
+  }
+  if (host.includes('eluniversal.com.mx') && contentText) {
+    contentText = cleanElUniversalText(contentText);
   }
   result.content = contentText;
   

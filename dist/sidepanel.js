@@ -964,9 +964,9 @@
     if (existingDbId > 0) {
       try {
         await navigator.clipboard.writeText(String(existingDbId));
-        showToast(`\u26A0\uFE0F Nota REPETIDA (ya en Medialog #${existingDbId}). ID copiado al Clipboard.`, 3e3, "large green");
+        showToast(`\u26A0\uFE0F Nota EXISTENTE (ya en Medialog #${existingDbId}). ID copiado al Clipboard.`, 3e3, "large green");
       } catch (e) {
-        showToast(`\u26A0\uFE0F Nota REPETIDA (ya en Medialog #${existingDbId}).`, 3e3, "large green");
+        showToast(`\u26A0\uFE0F Nota EXISTENTE (ya en Medialog #${existingDbId}).`, 3e3, "large green");
       }
       return;
     }
@@ -995,9 +995,9 @@
       await saveArticle(article);
       try {
         await navigator.clipboard.writeText(String(duplicadoId));
-        showToast(`\u26A0\uFE0F Nota REPETIDA en Medialog (#${duplicadoId}). ID copiado al Clipboard.`, 3e3, "large green");
+        showToast(`\u26A0\uFE0F Nota EXISTENTE en Medialog (#${duplicadoId}). ID copiado al Clipboard.`, 3e3, "large green");
       } catch (e) {
-        showToast(`\u26A0\uFE0F Nota REPETIDA en Medialog (#${duplicadoId}).`, 3e3, "large green");
+        showToast(`\u26A0\uFE0F Nota EXISTENTE en Medialog (#${duplicadoId}).`, 3e3, "large green");
       }
       populateUI(article);
       renderHistory();
@@ -1047,9 +1047,9 @@
     if (existingDbId > 0) {
       try {
         await navigator.clipboard.writeText(String(existingDbId));
-        showToast(`\u26A0\uFE0F Nota REPETIDA (ya en Medialog #${existingDbId}). ID copiado al Clipboard.`, 3e3, "large green");
+        showToast(`\u26A0\uFE0F Nota EXISTENTE (ya en Medialog #${existingDbId}). ID copiado al Clipboard.`, 3e3, "large green");
       } catch (e) {
-        showToast(`\u26A0\uFE0F Nota REPETIDA (ya en Medialog #${existingDbId}).`, 3e3, "large green");
+        showToast(`\u26A0\uFE0F Nota EXISTENTE (ya en Medialog #${existingDbId}).`, 3e3, "large green");
       }
       return;
     }
@@ -1081,9 +1081,9 @@
       await saveArticle(article);
       try {
         await navigator.clipboard.writeText(String(duplicadoId));
-        showToast(`\u26A0\uFE0F Nota REPETIDA en Medialog (#${duplicadoId}). ID copiado al Clipboard.`, 3e3, "large green");
+        showToast(`\u26A0\uFE0F Nota EXISTENTE en Medialog (#${duplicadoId}). ID copiado al Clipboard.`, 3e3, "large green");
       } catch (e) {
-        showToast(`\u26A0\uFE0F Nota REPETIDA en Medialog (#${duplicadoId}).`, 3e3, "large green");
+        showToast(`\u26A0\uFE0F Nota EXISTENTE en Medialog (#${duplicadoId}).`, 3e3, "large green");
       }
       populateUI(article);
       renderHistory();

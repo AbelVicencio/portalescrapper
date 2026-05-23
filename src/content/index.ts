@@ -21,6 +21,7 @@ function detectSite(): { site: string; name: string } | null {
     'elpais.com': 'El País',
     'reforma.com': 'Reforma',
     'milenio.com': 'Milenio',
+    'eluniversal.com.mx': 'El Universal',
   };
   for (const [key, val] of Object.entries(known)) {
     if (host.includes(key)) return { site: key, name: val };

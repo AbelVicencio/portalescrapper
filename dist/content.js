@@ -172,6 +172,17 @@
         paywall: ".a_tp, #ctn_freemium_article, .mura-wall, .paywall"
       }
     },
+    "eluniversal.com.mx": {
+      name: "El Universal",
+      hostPatterns: ["eluniversal.com.mx"],
+      selectors: {
+        title: "h1.title, h1.article-title",
+        author: ".sc__author-nota, .author",
+        date: "time[datetime], .sc__author--date",
+        content: ".sc__font-paragraph, .story-content p, article p",
+        paywall: ".paywall, .premium-banner"
+      }
+    },
     "reforma.com": {
       name: "Reforma",
       hostPatterns: ["reforma.com"],
@@ -425,6 +436,36 @@
       return p.replace(/[\.\s]*View\s*more\s*$/i, ".").trim();
     }).filter(Boolean).join("\n\n");
   }
+  function cleanElUniversalText(text) {
+    const paragraphs = text.split("\n\n").map((p) => p.trim()).filter(Boolean);
+    const filtered = paragraphs.filter((p) => {
+      const lower = p.toLowerCase();
+      if (p === "[Publicidad]" || lower === "[publicidad]") return false;
+      if (lower.includes("\xFAnete a nuestro canal") && lower.includes("whatsapp")) return false;
+      if (lower.includes("recibir directo en tu correo") && lower.includes("suscr\xEDbete")) return false;
+      if (lower.includes("recibe las noticias m\xE1s relevantes del d\xEDa")) return false;
+      if (lower.startsWith("lee tambi\xE9n") || lower.startsWith("lee aqu\xED la nota completa") || lower.startsWith("lee aqui la nota completa")) {
+        return false;
+      }
+      return true;
+    });
+    if (filtered.length === 0) return "";
+    let endIndex = filtered.length - 1;
+    for (let i = filtered.length - 1; i >= 0; i--) {
+      const p = filtered[i];
+      const lower = p.toLowerCase();
+      if (lower.startsWith("con informaci\xF3n de")) {
+        endIndex = i - 1;
+        break;
+      }
+      if (p.length > 25) {
+        endIndex = i;
+        break;
+      }
+    }
+    if (endIndex < 0) return "";
+    return filtered.slice(0, endIndex + 1).join("\n\n");
+  }
   function extractSiteSpecific(host) {
     const result = { method: "site-specific", confidence: 0 };
     const entry = Object.values(SITE_CONFIGS).find(
@@ -441,6 +482,9 @@
     }
     if (host.includes("bloomberg.com") && contentText) {
       contentText = cleanBloombergText(contentText);
+    }
+    if (host.includes("eluniversal.com.mx") && contentText) {
+      contentText = cleanElUniversalText(contentText);
     }
     result.content = contentText;
     result.section = sel.section ? querySelectorText(sel.section) : void 0;
@@ -788,7 +832,8 @@
       "washingtonpost.com": "Washington Post",
       "elpais.com": "El Pa\xEDs",
       "reforma.com": "Reforma",
-      "milenio.com": "Milenio"
+      "milenio.com": "Milenio",
+      "eluniversal.com.mx": "El Universal"
     };
     for (const [key, val] of Object.entries(known)) {
       if (host.includes(key)) return { site: key, name: val };
