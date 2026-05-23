@@ -363,7 +363,18 @@
     const nextDay = /* @__PURE__ */ new Date(day + "T12:00:00");
     nextDay.setDate(nextDay.getDate() + 1);
     const fechaFin = nextDay.toISOString().slice(0, 10);
-    const titulo = (superabstract || "").trim();
+    let titulo = (superabstract || "").trim();
+    const delimiterMatch = titulo.match(/[:|\-]/);
+    if (delimiterMatch && delimiterMatch.index && delimiterMatch.index > 15) {
+      titulo = titulo.substring(0, delimiterMatch.index).trim();
+    }
+    if (titulo.length > 60) {
+      titulo = titulo.substring(0, 60);
+      const lastSpace = titulo.lastIndexOf(" ");
+      if (lastSpace > 15) {
+        titulo = titulo.substring(0, lastSpace);
+      }
+    }
     const liga = (url || "").trim();
     async function intentarBusquedaPorTitulo(token2, titulo2, fechaInicio2, fechaFin2, emisoraParam) {
       try {
@@ -524,6 +535,8 @@
   var ZOOM_KEY = "portalescrapper_zoom";
   var currentZoom = 1;
   var isResolving = false;
+  var lastResolvedDomain = "";
+  var lastCheckedUrl = "";
   function toMexicoCityLocalISO2(input) {
     if (!input) {
       const now = /* @__PURE__ */ new Date();
@@ -636,12 +649,17 @@
     await chrome.storage.local.set({ [ZOOM_KEY]: currentZoom });
   }
   function getBaseDomain(hostname) {
-    hostname = hostname.replace(/^www\./, "");
-    const parts = hostname.split(".");
-    if (parts.length >= 2) {
-      return parts.slice(-2).join(".");
+    let domain = hostname.replace(/^www\./, "");
+    const parts = domain.split(".");
+    if (parts.length <= 2) {
+      return domain;
     }
-    return hostname;
+    const secondLevelTlds = ["com", "org", "net", "edu", "gob", "mil", "co", "ac", "info"];
+    const secondToLast = parts[parts.length - 2];
+    if (secondLevelTlds.includes(secondToLast)) {
+      return parts.slice(-3).join(".");
+    }
+    return parts.slice(-2).join(".");
   }
   function updatePortalHeader() {
     const header = el("portal-header");
@@ -708,11 +726,15 @@
     const loginVer = el("login-version");
     if (loginVer) loginVer.textContent = "v" + chrome.runtime.getManifest().version;
   }
-  function showToast(msg, timeout = 2400) {
+  function showToast(msg, timeout = 2400, extraClass = "") {
     const t = el("toast");
     t.textContent = msg;
+    if (extraClass) t.classList.add(...extraClass.split(" "));
     t.classList.add("show");
-    setTimeout(() => t.classList.remove("show"), timeout);
+    setTimeout(() => {
+      t.classList.remove("show");
+      if (extraClass) t.classList.remove(...extraClass.split(" "));
+    }, timeout);
   }
   async function renderHistory() {
     const container = el("history-list");
@@ -858,12 +880,25 @@
       });
     });
   }
-  async function autoResolveEmisora(url) {
+  async function autoResolveEmisora(url, force = false) {
     if (isResolving) {
       console.log("[PortalScrapper] autoResolveEmisora skipped (already running)");
       return;
     }
+    let baseDomain = "";
+    let fullHost = "";
+    try {
+      fullHost = new URL(url).hostname;
+      baseDomain = getBaseDomain(fullHost);
+    } catch (e) {
+      return;
+    }
+    if (!force && lastResolvedDomain === baseDomain) {
+      console.log(`[PortalScrapper] autoResolveEmisora skipped (domain ${baseDomain} already resolved)`);
+      return;
+    }
     isResolving = true;
+    lastResolvedDomain = baseDomain;
     try {
       if (!await ensureValidSession()) {
         isResolving = false;
@@ -873,8 +908,6 @@
         isResolving = false;
         return;
       }
-      const fullHost = new URL(url).hostname;
-      const baseDomain = getBaseDomain(fullHost);
       console.log(`[PortalScrapper] Resolviendo portal \u2192 baseDomain: ${baseDomain} (hostname original: ${fullHost})`);
       const result = await resolvePortalByDomain(currentToken, baseDomain, fullHost);
       if (result) {
@@ -918,6 +951,75 @@
       isResolving = false;
     }
   }
+  async function checkDuplicateNow(force = false) {
+    if (!await ensureValidSession()) return;
+    const article = readFormIntoArticle();
+    const currentUrl = article.url || article.urlWithParams || "";
+    const normalizedUrl = currentUrl.split("#")[0].split("?")[0];
+    if (!force && lastCheckedUrl === normalizedUrl) {
+      return;
+    }
+    lastCheckedUrl = normalizedUrl;
+    const existingDbId = parseInt(el("dbRecordId")?.value || "0", 10);
+    if (existingDbId > 0) {
+      try {
+        await navigator.clipboard.writeText(String(existingDbId));
+        showToast(`\u26A0\uFE0F Nota REPETIDA (ya en Medialog #${existingDbId}). ID copiado al Clipboard.`, 3e3, "large green");
+      } catch (e) {
+        showToast(`\u26A0\uFE0F Nota REPETIDA (ya en Medialog #${existingDbId}).`, 3e3, "large green");
+      }
+      return;
+    }
+    let localDuplicateId = 0;
+    if (normalizedUrl && !window.FORCE_API) {
+      const all = await getAllArticles();
+      const yaGuardadoLocal = all.find((a) => {
+        const au = (a.url || a.urlWithParams || "").trim();
+        const an = au.split("#")[0].split("?")[0];
+        return an === normalizedUrl && (a.dbRecordId || 0) > 0;
+      });
+      if (yaGuardadoLocal) {
+        localDuplicateId = yaGuardadoLocal.dbRecordId || 0;
+      }
+    }
+    const duplicadoId = await buscarMedialogDuplicado(
+      currentToken,
+      article.emisora || 0,
+      article.fecha_transcripcion || "",
+      article.superabstract || "",
+      currentUrl
+    );
+    if (duplicadoId && duplicadoId > 0) {
+      article.dbRecordId = duplicadoId;
+      article.status = "synced";
+      await saveArticle(article);
+      try {
+        await navigator.clipboard.writeText(String(duplicadoId));
+        showToast(`\u26A0\uFE0F Nota REPETIDA en Medialog (#${duplicadoId}). ID copiado al Clipboard.`, 3e3, "large green");
+      } catch (e) {
+        showToast(`\u26A0\uFE0F Nota REPETIDA en Medialog (#${duplicadoId}).`, 3e3, "large green");
+      }
+      populateUI(article);
+      renderHistory();
+      updateBadge();
+      return;
+    }
+    if (localDuplicateId > 0) {
+      try {
+        await navigator.clipboard.writeText(String(localDuplicateId));
+        showToast(`\u26A0\uFE0F Nota REPETIDA local (#${localDuplicateId})`, 2400);
+      } catch (e) {
+        showToast(`\u26A0\uFE0F Nota REPETIDA local (#${localDuplicateId})`, 2400);
+      }
+    } else {
+      showToast("Nota NO encontrada en Medialog", 3e3, "large");
+    }
+  }
+  async function performAutoChecks(url, force = false) {
+    if (!url) return;
+    await autoResolveEmisora(url, force);
+    await checkDuplicateNow(force);
+  }
   async function requestExtractionWithRetries(attempts = 4) {
     for (let i = 0; i < attempts; i++) {
       try {
@@ -943,12 +1045,18 @@
     const article = readFormIntoArticle();
     const existingDbId = parseInt(el("dbRecordId")?.value || "0", 10);
     if (existingDbId > 0) {
-      showToast(`\u26A0\uFE0F Esta nota ya fue guardada en Medialog (#${existingDbId}). No se cre\xF3 duplicado.`);
+      try {
+        await navigator.clipboard.writeText(String(existingDbId));
+        showToast(`\u26A0\uFE0F Nota REPETIDA (ya en Medialog #${existingDbId}). ID copiado al Clipboard.`, 3e3, "large green");
+      } catch (e) {
+        showToast(`\u26A0\uFE0F Nota REPETIDA (ya en Medialog #${existingDbId}).`, 3e3, "large green");
+      }
       return;
     }
     const currentUrl = el("url")?.value?.trim() || "";
     const normalizedUrl = currentUrl.split("#")[0].split("?")[0];
     const currentFormDbId = parseInt(el("dbRecordId")?.value || "0", 10);
+    let localDuplicateId = 0;
     if (normalizedUrl && currentFormDbId === 0 && !window.FORCE_API) {
       const all = await getAllArticles();
       const yaGuardadoLocal = all.find((a) => {
@@ -957,7 +1065,7 @@
         return an === normalizedUrl && (a.dbRecordId || 0) > 0;
       });
       if (yaGuardadoLocal) {
-        showToast(`\u26A0\uFE0F Esta URL ya fue guardada localmente (#${yaGuardadoLocal.dbRecordId}).`);
+        localDuplicateId = yaGuardadoLocal.dbRecordId || 0;
       }
     }
     const duplicadoId = await buscarMedialogDuplicado(
@@ -971,11 +1079,19 @@
       article.dbRecordId = duplicadoId;
       article.status = "synced";
       await saveArticle(article);
-      showToast(`\u26A0\uFE0F Esta nota ya existe en Medialog (#${duplicadoId}). No se cre\xF3 duplicado.`);
+      try {
+        await navigator.clipboard.writeText(String(duplicadoId));
+        showToast(`\u26A0\uFE0F Nota REPETIDA en Medialog (#${duplicadoId}). ID copiado al Clipboard.`, 3e3, "large green");
+      } catch (e) {
+        showToast(`\u26A0\uFE0F Nota REPETIDA en Medialog (#${duplicadoId}).`, 3e3, "large green");
+      }
       populateUI(article);
       renderHistory();
       updateBadge();
       return;
+    }
+    if (localDuplicateId > 0) {
+      console.log(`[PortalScrapper] Nota repetida localmente (#${localDuplicateId}), pero no en BDD. Procediendo a grabar en API...`);
     }
     article.fecha = toMexicoCityLocalISO2(/* @__PURE__ */ new Date());
     article.status = "draft";
@@ -1015,9 +1131,9 @@
         await saveArticle(article);
         try {
           await navigator.clipboard.writeText(String(dbId));
-          showToast(`\u2705 Medialog #${dbId} copiado al portapapeles`);
+          showToast(`\u2705 Grabado OK correctamente registro en la BDD y copiado al Clipboard (ID #${dbId})`, 3e3, "large");
         } catch (e) {
-          showToast(`\u2705 Guardado en API #${dbId} (no se pudo copiar)`);
+          showToast(`\u2705 Grabado OK correctamente registro en la BDD (ID #${dbId}), pero no se pudo copiar al Clipboard`, 3e3, "large");
         }
         currentArticle = article;
         populateUI(article);
@@ -1105,7 +1221,7 @@
         populateUI(currentArticle);
         editingDirty = false;
         const url = el("url").value;
-        if (url) autoResolveEmisora(url);
+        if (url) performAutoChecks(url).catch(console.error);
         showToast("Art\xEDculo extra\xEDdo");
       }
       if (msg.type === "SITE_DETECTED") {
@@ -1237,6 +1353,14 @@
       if (btn) btn.onclick = handler;
     };
     wire("btn-grabar", withButtonLoading("btn-grabar", handleGrabarAPI));
+    wire("btn-checar", withButtonLoading("btn-checar", async () => {
+      const url = el("url")?.value;
+      if (url) {
+        await performAutoChecks(url, true);
+      } else {
+        showToast("No hay URL para checar");
+      }
+    }));
     wire("btn-reextract", withButtonLoading("btn-reextract", handleReExtract));
     wire("btn-export-json", withButtonLoading("btn-export-json", async () => {
       const arts = await getAllArticles();

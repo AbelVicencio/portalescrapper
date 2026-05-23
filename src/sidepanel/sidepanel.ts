@@ -35,6 +35,8 @@ const ZOOM_KEY = 'portalescrapper_zoom';
 let currentZoom = 1;
 
 let isResolving = false;   // global guard to drop duplicate concurrent resolutions (the #1 cause of "panel freezes" feeling)
+let lastResolvedDomain = '';
+let lastCheckedUrl = '';
 
 // ========================================================
 // Normalización de fecha a hora local de Ciudad de México
@@ -189,12 +191,20 @@ async function saveZoom() {
 }
 
 function getBaseDomain(hostname: string): string {
-  hostname = hostname.replace(/^www\./, '');
-  const parts = hostname.split('.');
-  if (parts.length >= 2) {
-    return parts.slice(-2).join('.');
+  let domain = hostname.replace(/^www\./, '');
+  const parts = domain.split('.');
+  if (parts.length <= 2) {
+    return domain;
   }
-  return hostname;
+  
+  const secondLevelTlds = ['com', 'org', 'net', 'edu', 'gob', 'mil', 'co', 'ac', 'info'];
+  const secondToLast = parts[parts.length - 2];
+  
+  if (secondLevelTlds.includes(secondToLast)) {
+    return parts.slice(-3).join('.');
+  }
+  
+  return parts.slice(-2).join('.');
 }
 
 function updatePortalHeader() {
@@ -274,11 +284,15 @@ function setVersion() {
   if (loginVer) loginVer.textContent = 'v' + chrome.runtime.getManifest().version;
 }
 
-function showToast(msg: string, timeout = 2400) {
+function showToast(msg: string, timeout = 2400, extraClass = '') {
   const t = el('toast') as HTMLDivElement;
   t.textContent = msg;
+  if (extraClass) t.classList.add(...extraClass.split(' '));
   t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), timeout);
+  setTimeout(() => {
+    t.classList.remove('show');
+    if (extraClass) t.classList.remove(...extraClass.split(' '));
+  }, timeout);
 }
 
 async function renderHistory() {
@@ -439,12 +453,26 @@ function attachFormDirtyWatchers() {
   });
 }
 
-async function autoResolveEmisora(url: string) {
+async function autoResolveEmisora(url: string, force = false) {
   if (isResolving) {
     console.log('[PortalScrapper] autoResolveEmisora skipped (already running)');
     return;
   }
+  
+  let baseDomain = '';
+  let fullHost = '';
+  try {
+    fullHost = new URL(url).hostname;
+    baseDomain = getBaseDomain(fullHost);
+  } catch (e) { return; }
+
+  if (!force && lastResolvedDomain === baseDomain) {
+    console.log(`[PortalScrapper] autoResolveEmisora skipped (domain ${baseDomain} already resolved)`);
+    return;
+  }
+
   isResolving = true;
+  lastResolvedDomain = baseDomain;
   try {
     if (!(await ensureValidSession())) {
       isResolving = false;
@@ -454,9 +482,6 @@ async function autoResolveEmisora(url: string) {
       isResolving = false;
       return;
     }
-
-    const fullHost = new URL(url).hostname;
-    const baseDomain = getBaseDomain(fullHost);
 
     console.log(`[PortalScrapper] Resolviendo portal → baseDomain: ${baseDomain} (hostname original: ${fullHost})`);
 
@@ -510,6 +535,87 @@ async function autoResolveEmisora(url: string) {
   }
 }
 
+async function checkDuplicateNow(force = false) {
+  if (!(await ensureValidSession())) return;
+
+  const article = readFormIntoArticle();
+  const currentUrl = article.url || article.urlWithParams || '';
+  const normalizedUrl = currentUrl.split('#')[0].split('?')[0];
+
+  if (!force && lastCheckedUrl === normalizedUrl) {
+    return;
+  }
+  lastCheckedUrl = normalizedUrl;
+
+  const existingDbId = parseInt((el('dbRecordId') as HTMLInputElement | null)?.value || '0', 10);
+  if (existingDbId > 0) {
+    try {
+      await navigator.clipboard.writeText(String(existingDbId));
+      showToast(`⚠️ Nota REPETIDA (ya en Medialog #${existingDbId}). ID copiado al Clipboard.`, 3000, 'large green');
+    } catch (e) {
+      showToast(`⚠️ Nota REPETIDA (ya en Medialog #${existingDbId}).`, 3000, 'large green');
+    }
+    return;
+  }
+
+  // 1. Chequeo local
+  let localDuplicateId = 0;
+  if (normalizedUrl && !(window as any).FORCE_API) {
+    const all = await storage.getAllArticles();
+    const yaGuardadoLocal = all.find(a => {
+      const au = (a.url || a.urlWithParams || '').trim();
+      const an = au.split('#')[0].split('?')[0];
+      return an === normalizedUrl && (a.dbRecordId || 0) > 0;
+    });
+
+    if (yaGuardadoLocal) {
+      localDuplicateId = yaGuardadoLocal.dbRecordId || 0;
+    }
+  }
+
+  // 2. Chequeo remoto API
+  const duplicadoId = await buscarMedialogDuplicado(
+    currentToken!,
+    article.emisora || 0,
+    article.fecha_transcripcion || '',
+    article.superabstract || '',
+    currentUrl
+  );
+
+  if (duplicadoId && duplicadoId > 0) {
+    article.dbRecordId = duplicadoId;
+    article.status = 'synced';
+    await storage.saveArticle(article);
+    try {
+      await navigator.clipboard.writeText(String(duplicadoId));
+      showToast(`⚠️ Nota REPETIDA en Medialog (#${duplicadoId}). ID copiado al Clipboard.`, 3000, 'large green');
+    } catch (e) {
+      showToast(`⚠️ Nota REPETIDA en Medialog (#${duplicadoId}).`, 3000, 'large green');
+    }
+    populateUI(article);
+    renderHistory();
+    storage.updateBadge();
+    return;
+  } 
+
+  if (localDuplicateId > 0) {
+    try {
+      await navigator.clipboard.writeText(String(localDuplicateId));
+      showToast(`⚠️ Nota REPETIDA local (#${localDuplicateId})`, 2400);
+    } catch (e) {
+      showToast(`⚠️ Nota REPETIDA local (#${localDuplicateId})`, 2400);
+    }
+  } else {
+    showToast('Nota NO encontrada en Medialog', 3000, 'large');
+  }
+}
+
+async function performAutoChecks(url: string, force = false) {
+  if (!url) return;
+  await autoResolveEmisora(url, force);
+  await checkDuplicateNow(force);
+}
+
 async function requestExtractionWithRetries(attempts: number = 4) {
   for (let i = 0; i < attempts; i++) {
     try {
@@ -543,7 +649,12 @@ async function handleGrabarAPI() {
   // ========================================================
   const existingDbId = parseInt((el('dbRecordId') as HTMLInputElement | null)?.value || '0', 10);
   if (existingDbId > 0) {
-    showToast(`⚠️ Esta nota ya fue guardada en Medialog (#${existingDbId}). No se creó duplicado.`);
+    try {
+      await navigator.clipboard.writeText(String(existingDbId));
+      showToast(`⚠️ Nota REPETIDA (ya en Medialog #${existingDbId}). ID copiado al Clipboard.`, 3000, 'large green');
+    } catch (e) {
+      showToast(`⚠️ Nota REPETIDA (ya en Medialog #${existingDbId}).`, 3000, 'large green');
+    }
     return;
   }
 
@@ -558,6 +669,8 @@ async function handleGrabarAPI() {
   // no volvemos a hacer el chequeo local agresivo.
   const currentFormDbId = parseInt((el('dbRecordId') as HTMLInputElement | null)?.value || '0', 10);
 
+  let localDuplicateId = 0;
+
   if (normalizedUrl && currentFormDbId === 0 && !(window as any).FORCE_API) {
     const all = await storage.getAllArticles();
     const yaGuardadoLocal = all.find(a => {
@@ -567,10 +680,7 @@ async function handleGrabarAPI() {
     });
 
     if (yaGuardadoLocal) {
-      // Mostramos el ID anterior pero NO bloqueamos si el usuario tiene FORCE_API
-      // (aunque ya lo saltamos arriba). Dejamos el mensaje informativo.
-      showToast(`⚠️ Esta URL ya fue guardada localmente (#${yaGuardadoLocal.dbRecordId}).`);
-      // No retornamos aquí para que el usuario pueda forzar con FORCE_API si quiere
+      localDuplicateId = yaGuardadoLocal.dbRecordId || 0;
     }
   }
 
@@ -587,11 +697,20 @@ async function handleGrabarAPI() {
     article.dbRecordId = duplicadoId;
     article.status = 'synced';
     await storage.saveArticle(article);
-    showToast(`⚠️ Esta nota ya existe en Medialog (#${duplicadoId}). No se creó duplicado.`);
+    try {
+      await navigator.clipboard.writeText(String(duplicadoId));
+      showToast(`⚠️ Nota REPETIDA en Medialog (#${duplicadoId}). ID copiado al Clipboard.`, 3000, 'large green');
+    } catch (e) {
+      showToast(`⚠️ Nota REPETIDA en Medialog (#${duplicadoId}).`, 3000, 'large green');
+    }
     populateUI(article);
     renderHistory();
     storage.updateBadge();
     return; // No continuamos con el POST
+  }
+
+  if (localDuplicateId > 0) {
+    console.log(`[PortalScrapper] Nota repetida localmente (#${localDuplicateId}), pero no en BDD. Procediendo a grabar en API...`);
   }
 
   // 1) Save local draft (solo si NO es duplicado)
@@ -654,9 +773,9 @@ async function handleGrabarAPI() {
       // Copiar el nuevo ID al portapapeles del usuario
       try {
         await navigator.clipboard.writeText(String(dbId));
-        showToast(`✅ Medialog #${dbId} copiado al portapapeles`);
+        showToast(`✅ Grabado OK correctamente registro en la BDD y copiado al Clipboard (ID #${dbId})`, 3000, 'large');
       } catch (e) {
-        showToast(`✅ Guardado en API #${dbId} (no se pudo copiar)`);
+        showToast(`✅ Grabado OK correctamente registro en la BDD (ID #${dbId}), pero no se pudo copiar al Clipboard`, 3000, 'large');
       }
 
       currentArticle = article;
@@ -769,7 +888,7 @@ function setupSidePanelMessageListener() {
       editingDirty = false;
 
       const url = (el('url') as HTMLInputElement).value;
-      if (url) autoResolveEmisora(url);
+      if (url) performAutoChecks(url).catch(console.error);
       showToast('Artículo extraído');
     }
     if (msg.type === 'SITE_DETECTED') {
@@ -923,6 +1042,14 @@ async function initMainUI() {
   };
 
   wire('btn-grabar', withButtonLoading('btn-grabar', handleGrabarAPI));
+  wire('btn-checar', withButtonLoading('btn-checar', async () => {
+    const url = (el('url') as HTMLInputElement | null)?.value;
+    if (url) {
+      await performAutoChecks(url, true);
+    } else {
+      showToast('No hay URL para checar');
+    }
+  }));
   wire('btn-reextract', withButtonLoading('btn-reextract', handleReExtract));
   wire('btn-export-json', withButtonLoading('btn-export-json', async () => {
     const arts = await storage.getAllArticles();

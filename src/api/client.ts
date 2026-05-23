@@ -288,7 +288,23 @@ export async function healthCheck(): Promise<boolean> {
     nextDay.setDate(nextDay.getDate() + 1);
     const fechaFin = nextDay.toISOString().slice(0, 10); // YYYY-MM-DD of the next day
 
-    const titulo = (superabstract || '').trim();
+    let titulo = (superabstract || '').trim();
+    
+    // Mejoramos la robustez de la búsqueda por título:
+    // 1. Cortar antes del primer delimitador (: | -) para omitir autores o nombres de portal
+    const delimiterMatch = titulo.match(/[:|\-]/);
+    if (delimiterMatch && delimiterMatch.index && delimiterMatch.index > 15) {
+      titulo = titulo.substring(0, delimiterMatch.index).trim();
+    }
+    // 2. Limitar a máximo 60 caracteres, cortando en el último espacio para no dejar palabras rotas
+    if (titulo.length > 60) {
+      titulo = titulo.substring(0, 60);
+      const lastSpace = titulo.lastIndexOf(' ');
+      if (lastSpace > 15) {
+        titulo = titulo.substring(0, lastSpace);
+      }
+    }
+
     const liga = (url || '').trim();
 
     // Helper for title (superabstract) search – mirrors intentarBusquedaPorUrl but for title
