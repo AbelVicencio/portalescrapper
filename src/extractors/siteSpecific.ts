@@ -64,7 +64,7 @@ export const SITE_CONFIGS: Record<string, SiteConfig> = {
       title: 'h1.a_t, h1.c_t, h1.article-header__title',
       author: '.a_md_a_n, .author-name, [data-testid="author"]',
       date: 'time[datetime]',
-      content: 'article p, .a_c p, .article-body p',
+      content: '.a_c p, .article-body p, [data-testid="article-body"] p',
       paywall: '.a_tp, #ctn_freemium_article, .mura-wall, .paywall'
     }
   },
@@ -75,7 +75,7 @@ export const SITE_CONFIGS: Record<string, SiteConfig> = {
       title: 'h1.title, h1.article-title',
       author: '.sc__author-nota, .author',
       date: 'time[datetime], .sc__author--date',
-      content: '.sc__font-paragraph, .story-content p, article p',
+      content: '.sc__font-paragraph, .story-content p, .timeline-card p',
       paywall: '.paywall, .premium-banner'
     }
   },
@@ -84,10 +84,10 @@ export const SITE_CONFIGS: Record<string, SiteConfig> = {
     hostPatterns: ['reforma.com'],
     selectors: {
       title: 'h1.article-title, #MainContent h1, h1.title',
-      author: '.author, .article-author, .byline',
-      date: 'time[datetime], .date',
-      content: '.article-body p, #article-body p',
-      paywall: '.paywall, .subscription-wall'
+      author: '.author, .article-author, .byline, [name="cXenseParse:author"]',
+      date: 'time[datetime], .date, meta[name="cXenseParse:recs:publishtime"]',
+      content: '.gr_texto_articulo, .article-body p, #article-body p',
+      paywall: '.paywall, .subscription-wall, #caja_suscripcion'
     }
   },
   'milenio.com': {
@@ -201,14 +201,20 @@ function collectText(selector: string): string {
     });
 
     return sortedNodes
-      .map((n) => n.textContent?.trim())
+      .map((n) => {
+        const el = n as HTMLElement;
+        return (el.innerText || el.textContent || '').trim();
+      })
       .filter(Boolean)
       .join('\n\n');
   }
 
   const nodes = document.querySelectorAll(selector);
   return Array.from(nodes)
-    .map((n) => n.textContent?.trim())
+    .map((n) => {
+      const el = n as HTMLElement;
+      return (el.innerText || el.textContent || '').trim();
+    })
     .filter(Boolean)
     .join('\n\n');
 }
@@ -554,10 +560,32 @@ export function cleanElUniversalText(text: string): string {
 
   if (filtered.length === 0) return '';
 
-  // Cortar al final en la firma "Con información de..." o similares
-  let endIndex = filtered.length - 1;
-  for (let i = filtered.length - 1; i >= 0; i--) {
+  // Cortar si encontramos un encabezado obvio de fin de nota o recomendaciones de barra lateral
+  let stopIndex = filtered.length;
+  for (let i = 0; i < filtered.length; i++) {
     const p = filtered[i];
+    const lower = p.toLowerCase();
+    if (
+      lower === 'lo más leído' || 
+      lower === 'lo mas leido' ||
+      lower === 'temas relacionados' || 
+      lower === 'más información' || 
+      lower === 'mas informacion' ||
+      lower === 'opinión' ||
+      lower === 'opinion'
+    ) {
+      stopIndex = i;
+      break;
+    }
+  }
+  const mainParagraphs = filtered.slice(0, stopIndex);
+
+  if (mainParagraphs.length === 0) return '';
+
+  // Cortar al final en la firma "Con información de..." o similares
+  let endIndex = mainParagraphs.length - 1;
+  for (let i = mainParagraphs.length - 1; i >= 0; i--) {
+    const p = mainParagraphs[i];
     const lower = p.toLowerCase();
     
     if (lower.startsWith('con información de')) {
@@ -574,7 +602,266 @@ export function cleanElUniversalText(text: string): string {
   }
 
   if (endIndex < 0) return '';
-  return filtered.slice(0, endIndex + 1).join('\n\n');
+  return mainParagraphs.slice(0, endIndex + 1).join('\n\n');
+}
+
+export function cleanElPaisText(text: string): string {
+  if (!text) return '';
+  
+  // 1. Clean up any leaked HTML tag fragments or malformed link attributes
+  // e.g. `.com/mexico/...html" target="_self" rel="" title="..." data-link-track-dtm="">`
+  let cleaned = text.replace(/[a-zA-Z0-9\-\.\/_~%?&=#+:]+"(?:\s+[a-zA-Z\-]+="[^"]*")+\s*\/?>/g, '');
+  
+  // 2. If the text starts with sharing bar elements merged together with the actual content,
+  // we can strip the sharing bar prefix by finding the last occurrence of 'copiar enlace'
+  // or other sharing keywords at the very beginning.
+  const lowerText = cleaned.toLowerCase();
+  if (lowerText.includes('compartir en whatsapp') || lowerText.includes('copiar enlace')) {
+    const copyEnlaceIdx = lowerText.lastIndexOf('copiar enlace');
+    if (copyEnlaceIdx !== -1) {
+      const candidate = cleaned.slice(copyEnlaceIdx + 'copiar enlace'.length).trim();
+      if (candidate.length > 20) {
+        cleaned = candidate;
+      }
+    }
+  }
+
+  const paragraphs = cleaned.split('\n\n').map(p => p.trim()).filter(Boolean);
+  const filtered: string[] = [];
+  
+  for (const p of paragraphs) {
+    let cleanP = p;
+    const lowerP = p.toLowerCase();
+    
+    // If the paragraph has footer noise glued to the end of actual content
+    if (lowerP.includes('mis comentarios') || lowerP.includes('hazte premium') || lowerP.includes('archivado en')) {
+      const idxs = [
+        lowerP.indexOf('mis comentarios'),
+        lowerP.indexOf('hazte premium'),
+        lowerP.indexOf('archivado en')
+      ].filter(idx => idx !== -1);
+      
+      if (idxs.length > 0) {
+        const cutIdx = Math.min(...idxs);
+        cleanP = p.slice(0, cutIdx).trim();
+      }
+    }
+
+    const lower = cleanP.toLowerCase();
+    
+    // Skip sharing bar text
+    if (
+      lower.includes('compartir en whatsapp') ||
+      lower.includes('compartir en facebook') ||
+      lower.includes('compartir en twitter') ||
+      lower.includes('copiar enlace') ||
+      lower.includes('ir a los comentarios') ||
+      lower.includes('añadir el país') ||
+      lower.includes('anadir el pais') ||
+      lower.includes('compartir:')
+    ) {
+      continue;
+    }
+    
+    // Skip registration/comment footers
+    if (
+      lower.includes('mis comentarios') ||
+      lower.includes('rellena tu nombre') ||
+      lower.includes('hazte premium') ||
+      lower.includes('completar datos') ||
+      lower.includes('ya tengo una suscripción') ||
+      lower.includes('ya tengo una suscripcion') ||
+      lower.includes('archivado en')
+    ) {
+      continue;
+    }
+    
+    // Skip tags lists or repeated category tags at the very end
+    if (
+      lower.startsWith('méxico américa latinoamérica') || 
+      lower.startsWith('mexico america latinoamerica') ||
+      lower.includes('méxico américa latinoamérica') ||
+      lower.includes('mexico america latinoamerica') ||
+      (lower.includes('sinaloa') && lower.includes('interpol') && (lower.includes('omar garcia harfuch') || lower.includes('omar garcía harfuch')) && cleanP.length < 200)
+    ) {
+      continue;
+    }
+    
+    if (cleanP.trim().length > 0) {
+      filtered.push(cleanP.trim());
+    }
+  }
+  
+  if (filtered.length === 0) return '';
+  
+  return filtered.map(p => p.replace(/\s{2,}/g, ' ')).join('\n\n');
+}
+
+export function cleanReformaText(text: string): string {
+  // innerText preserves \n for <br> and <p>, let's normalize them
+  const paragraphs = text.split(/\n+/).map(p => p.trim()).filter(Boolean);
+  return paragraphs.join('\n\n');
+}
+
+export function cleanMilenioText(text: string, authorName = '', titleText = ''): string {
+  const paragraphs = text.split(/\n+/).map(p => p.trim()).filter(Boolean);
+  
+  // 1. Identify start marker
+  // Milenio articles frequently start after a dateline: "Ciudad de México / 22.05.2026 17:05:00"
+  let startIndex = 0;
+  let datelineFound = false;
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const p = paragraphs[i];
+    // Check for standard date line "Location / DD.MM.YYYY"
+    if (p.includes(' / ') && p.match(/\d{2}\.\d{2}\.\d{4}/)) {
+      startIndex = i + 1;
+      datelineFound = true;
+      break;
+    }
+  }
+
+  // Fallback: Skip standard metadata
+  if (!datelineFound) {
+    const titleClean = titleText.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim().toLowerCase();
+    const authorClean = authorName.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim().toLowerCase();
+    const descEl = document.querySelector('meta[name="description"]');
+    const descText = descEl ? descEl.getAttribute('content') || '' : '';
+    const descClean = descText.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim().toLowerCase();
+
+    for (let i = 0; i < paragraphs.length; i++) {
+      const p = paragraphs[i];
+      const pClean = p.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim().toLowerCase();
+      
+      if (!pClean) continue;
+      if (titleClean && (pClean === titleClean || pClean.includes(titleClean) || titleClean.includes(pClean))) continue;
+      if (descClean && (pClean === descClean || pClean.includes(descClean) || descClean.includes(pClean))) continue;
+      if (authorClean && pClean.includes(authorClean)) continue;
+      
+      // Specifically bypass repeated noisy phrases
+      if (pClean.includes('el registro nacional de detenciones detalla que el aseguramiento se realiz')) continue;
+
+      startIndex = i;
+      break;
+    }
+  }
+
+  // 2. Identify end marker
+  let endIndex = paragraphs.length - 1;
+
+  // Scan backward to find the LAST occurrence of bottom noise triggers (like the final "También puedes ver")
+  for (let i = paragraphs.length - 1; i >= startIndex; i--) {
+    const pLower = paragraphs[i].toLowerCase();
+    if (
+      pLower.startsWith('también puedes leer') ||
+      pLower.startsWith('tambien puedes leer') ||
+      pLower.startsWith('también puedes ver') ||
+      pLower.startsWith('tambien puedes ver') ||
+      pLower.startsWith('también lee') ||
+      pLower.startsWith('tambien lee') ||
+      pLower.startsWith('te recomendamos') ||
+      pLower.startsWith('sigue leyendo') ||
+      pLower.startsWith('lee también') ||
+      pLower.startsWith('lee tambien') ||
+      pLower.includes('participa en la ola') ||
+      pLower.includes('es real. participa')
+    ) {
+      endIndex = i - 1;
+      break;
+    }
+  }
+
+  for (let i = endIndex; i >= startIndex; i--) {
+    const p = paragraphs[i];
+    const pLower = p.toLowerCase();
+    
+    // Check for typical footers
+    if (
+      pLower.startsWith('síguenos en') ||
+      pLower.startsWith('siguenos en') ||
+      pLower.includes('tags relacionados') ||
+      pLower.includes('queda prohibida la reproducción') ||
+      pLower.includes('propiedad de milenio diario') ||
+      pLower.includes('estudió ciencias de la comunicación') ||
+      pLower.includes('con más de 25 años de experiencia') ||
+      pLower.includes('premio estatal de periodismo') ||
+      pLower.includes('amante de los autos clásicos') ||
+      pLower.includes('para conocer más sobre') ||
+      pLower.includes('derechos reservados') ||
+      pLower.startsWith('también puedes leer') ||
+      pLower.startsWith('tambien puedes leer') ||
+      pLower.startsWith('también puedes ver') ||
+      pLower.startsWith('tambien puedes ver') ||
+      pLower.startsWith('te recomendamos') ||
+      pLower.startsWith('sigue leyendo') ||
+      pLower.startsWith('lee también') ||
+      pLower.startsWith('lee tambien') ||
+      pLower.includes('participa en la ola') ||
+      pLower.includes('es real. participa')
+    ) {
+      endIndex = i - 1;
+      continue;
+    }
+
+    // Keep initials like "AG" or short ending tags
+    break;
+  }
+
+  if (startIndex > endIndex) return '';
+
+  const storyParagraphs = paragraphs.slice(startIndex, endIndex + 1);
+  const filtered: string[] = [];
+
+  // 3. Filter out "Te recomendamos" and noise inside the body
+  let i = 0;
+  while (i < storyParagraphs.length) {
+    const p = storyParagraphs[i];
+    const pLower = p.toLowerCase();
+    const pClean = p.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim().toLowerCase();
+
+    // Specific noise from the user's example
+    if (pClean.includes('el registro nacional de detenciones detalla que el aseguramiento se realiz')) {
+      i++;
+      continue;
+    }
+
+    if (pLower.includes('te recomendamos')) {
+      i++; // Skip "Te recomendamos..."
+      
+      // Skip the recommended articles
+      let skippedCount = 0;
+      while (i < storyParagraphs.length && skippedCount < 5) {
+        const nextP = storyParagraphs[i];
+        
+        // Headlines usually lack terminal punctuation like periods or exclamation marks.
+        // They might end in quotes.
+        if (nextP.length < 250 && !nextP.match(/[.!?]$/)) {
+          // Example: "Irving Sánchez: el control político de Yecapixtla que terminó bajo investigación de la FGR"
+          // Without period at the end.
+          // Wait, what if it ends with a quote?
+          if (nextP.match(/["']$/) && !nextP.match(/[.!?]["']$/)) {
+             i++;
+             skippedCount++;
+          } else {
+             // Normal string without period
+             i++;
+             skippedCount++;
+          }
+        } else if (nextP.includes('...')) {
+          i++;
+          skippedCount++;
+        } else {
+          break; // Found normal text
+        }
+      }
+      continue;
+    }
+
+    filtered.push(p);
+    i++;
+  }
+
+  return filtered.join('\n\n');
 }
 
 export function extractSiteSpecific(host: string): ExtractorResult {
@@ -598,6 +885,15 @@ export function extractSiteSpecific(host: string): ExtractorResult {
   }
   if (host.includes('eluniversal.com.mx') && contentText) {
     contentText = cleanElUniversalText(contentText);
+  }
+  if (host.includes('reforma.com') && contentText) {
+    contentText = cleanReformaText(contentText);
+  }
+  if (host.includes('milenio.com') && contentText) {
+    contentText = cleanMilenioText(contentText, result.author, result.title);
+  }
+  if (host.includes('elpais.com') && contentText) {
+    contentText = cleanElPaisText(contentText);
   }
   result.content = contentText;
   

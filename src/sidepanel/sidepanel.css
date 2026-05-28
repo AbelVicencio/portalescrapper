@@ -2,6 +2,7 @@
   --bg: #0f0f1b;
   --panel: #16162a;
   --accent: #3b82f6;
+  --accent-active: #1d4ed8;
   --text: #e5e7eb;
   --muted: #9ca3af;
   --success: #22c55e;
@@ -13,6 +14,7 @@ body.light {
   --bg: #f8f9fa;
   --panel: #ffffff;
   --accent: #2563eb;
+  --accent-active: #1d4ed8;
   --text: #1f2937;
   --muted: #6b7280;
   --success: #16a34a;
@@ -45,9 +47,27 @@ header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid #2e2e45;
   padding-bottom: 8px;
+}
+
+.sticky-header {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 100;
+  padding-top: 8px;
+  margin-left: -12px;
+  margin-right: -12px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-bottom: 1px solid #2e2e45;
   margin-bottom: 12px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+body.light .sticky-header {
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 h1 {
@@ -63,6 +83,16 @@ button {
   border-radius: 6px;
   cursor: pointer;
   font-size: 12.5px;
+  transition: transform 0.05s ease, background-color 0.15s ease;
+}
+
+button:hover {
+  filter: brightness(1.15);
+}
+
+button:active {
+  transform: scale(0.96);
+  background-color: var(--accent-active);
 }
 
 button.secondary {
@@ -135,6 +165,27 @@ textarea {
 .field-row > div {
   flex: 1 1 160px;
   min-width: 140px;
+}
+
+.compact-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.compact-grid > div {
+  min-width: 0;
+}
+
+.compact-grid input {
+  margin-bottom: 0;
+}
+
+@media (max-width: 480px) {
+  .compact-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 @media (max-width: 380px) {

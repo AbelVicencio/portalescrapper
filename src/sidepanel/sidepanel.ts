@@ -3,7 +3,7 @@ import * as storage from '../storage/store';
 import * as clipboard from '../utils/clipboard';
 import * as exportUtils from '../utils/export';
 import { login, logout, getCurrentUser } from '../api/auth';
-import { resolvePortalByDomain, resolveEmisionPorEmisoraYFecha, grabarMedialog, buscarMedialogDuplicado, crearRelacionMedialog, type GrabarMedialogPayload } from '../api/client';
+import { resolvePortalByDomain, resolveEmisionPorEmisoraYFecha, grabarMedialog, buscarMedialogDuplicado, crearRelacionMedialog, getMedialogHash, type GrabarMedialogPayload } from '../api/client';
 import { PORTAL_CLASSIFICATIONS } from '../config/portalClassifications';
 
 // ============================================================================
@@ -331,6 +331,16 @@ async function renderHistory() {
   });
 }
 
+function updateEditarButtonState() {
+  const dbIdInput = el('dbRecordId') as HTMLInputElement | null;
+  const dbIdVal = dbIdInput?.value || '';
+  const btnEditar = el('btn-editar') as HTMLButtonElement | null;
+  if (btnEditar) {
+    const numericId = parseInt(dbIdVal, 10);
+    btnEditar.disabled = !dbIdVal || isNaN(numericId) || numericId <= 0;
+  }
+}
+
 function populateUI(article: Partial<NewsArticle>) {
   const setVal = (id: string, val: string) => {
     const input = el(id) as HTMLInputElement | HTMLTextAreaElement | null;
@@ -342,7 +352,6 @@ function populateUI(article: Partial<NewsArticle>) {
   setVal('emisora', String(article.emisora || ''));
   setVal('portal', String(article.portal ?? article.pendiente ?? ''));
   setVal('emision', String(article.emision || 4659889));
-  setVal('fecha', article.fecha || '');
   setVal('fecha_transcripcion', article.fecha_transcripcion || '');
   setVal('dbRecordId', String(article.dbRecordId || ''));
   setVal('medio', article.medio || '');
@@ -350,6 +359,7 @@ function populateUI(article: Partial<NewsArticle>) {
   setVal('texto', article.texto || '');
   renderClasificaciones(article.clasificaciones || []);
   updatePortalHeader();
+  updateEditarButtonState();
 }
 
 function readFormIntoArticle(): NewsArticle {
@@ -366,7 +376,7 @@ function readFormIntoArticle(): NewsArticle {
     emisora: parseInt(getVal('emisora'), 10) || 0,
     emision: parseInt(getVal('emision'), 10) || 4659889,
     fecha: currentArticle.fecha || toMexicoCityLocalISO(now),
-    fecha_transcripcion: toMexicoCityLocalISO(getVal('fecha_transcripcion') || getVal('fecha') || now),
+    fecha_transcripcion: toMexicoCityLocalISO(getVal('fecha_transcripcion') || now),
     usuario: currentUser || 'anon',
     evento: 1,
     superabstract: getVal('superabstract'),
@@ -583,16 +593,30 @@ async function checkDuplicateNow(force = false) {
   );
 
   if (duplicadoId && duplicadoId > 0) {
-    article.dbRecordId = duplicadoId;
-    article.status = 'synced';
-    await storage.saveArticle(article);
+    // Actualizar el estado global para que extracciones futuras no lo borren
+    currentArticle.dbRecordId = duplicadoId;
+    currentArticle.status = 'synced';
+
+    // Guardar usando la información más fresca de la UI
+    const articleToSave = readFormIntoArticle();
+    articleToSave.dbRecordId = duplicadoId;
+    articleToSave.status = 'synced';
+    await storage.saveArticle(articleToSave);
+
     try {
       await navigator.clipboard.writeText(String(duplicadoId));
       showToast(`⚠️ Nota EXISTENTE en Medialog (#${duplicadoId}). ID copiado al Clipboard.`, 3000, 'large green');
     } catch (e) {
       showToast(`⚠️ Nota EXISTENTE en Medialog (#${duplicadoId}).`, 3000, 'large green');
     }
-    populateUI(article);
+    
+    // Solo actualizar el campo afectado en la UI para no borrar resoluciones asíncronas
+    const dbIdInput = el('dbRecordId') as HTMLInputElement | null;
+    if (dbIdInput) {
+      dbIdInput.value = String(duplicadoId);
+      updateEditarButtonState();
+    }
+    
     renderHistory();
     storage.updateBadge();
     return;
@@ -814,7 +838,7 @@ async function handleGrabarAPI() {
 async function handleReExtract() {
   if (!(await ensureValidSession())) return;
   if (editingDirty) {
-    if (!confirm('Tienes cambios sin guardar. ¿Re-extraer y sobrescribir?')) return;
+    if (!confirm('Tienes cambios sin guardar. ¿Extraer y sobrescribir?')) return;
   }
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -854,6 +878,46 @@ function setupSidePanelMessageListener() {
   chrome.runtime.onMessage.addListener((msg: ExtensionMessage) => {
     if (msg.type === 'ARTICLE_EXTRACTED' && msg.payload) {
       const previousUrl = currentArticle.url || '';
+      const newUrl = msg.payload.url || '';
+      const normalizedNew = newUrl.split('#')[0].split('?')[0];
+      const normalizedPrev = previousUrl.split('#')[0].split('?')[0];
+
+      let isSameDomain = false;
+      try {
+        if (newUrl && previousUrl) {
+           const prevDomain = getBaseDomain(new URL(previousUrl).hostname);
+           const nextDomain = getBaseDomain(new URL(newUrl).hostname);
+           if (prevDomain === nextDomain) isSameDomain = true;
+        }
+      } catch (e) {}
+
+      if (normalizedNew && normalizedNew !== normalizedPrev) {
+        // Es una nota distinta → limpiamos cualquier ID anterior que pudiera quedar
+        currentArticle.dbRecordId = undefined;
+        const dbIdInput = el('dbRecordId') as HTMLInputElement | null;
+        if (dbIdInput) {
+          dbIdInput.value = '';
+          updateEditarButtonState();
+        }
+      }
+
+      // Si es el mismo dominio, quitamos los valores por defecto del payload 
+      // para que el spread operator no sobreescriba lo que ya resolvió la API.
+      if (isSameDomain) {
+        if (msg.payload.emisora === 0) delete msg.payload.emisora;
+        if (msg.payload.emision === 4659889) delete msg.payload.emision;
+        if (!msg.payload.portal) delete msg.payload.portal;
+        if (!msg.payload.nombre_portal) delete msg.payload.nombre_portal;
+        if (!msg.payload.pais) delete msg.payload.pais;
+      } else {
+        // Si es un dominio NUEVO, limpiamos los campos de la API locales para forzar una nueva resolución
+        currentArticle.emisora = undefined;
+        currentArticle.emision = undefined;
+        currentArticle.portal = undefined;
+        currentArticle.nombre_portal = undefined;
+        currentArticle.pais = undefined;
+      }
+
       currentArticle = { ...currentArticle, ...msg.payload };
       if (!currentArticle.id) currentArticle.id = crypto.randomUUID();
 
@@ -871,21 +935,13 @@ function setupSidePanelMessageListener() {
       if (currentArticle.texto) {
         currentArticle.texto = normalizeTranscription(currentArticle.texto as string);
       }
-
-      // === LIMPIEZA DE ESTADO cuando es una nota diferente ===
-      const newUrl = currentArticle.url || '';
-      const normalizedNew = newUrl.split('#')[0].split('?')[0];
-      const normalizedPrev = previousUrl.split('#')[0].split('?')[0];
-
-      if (normalizedNew && normalizedNew !== normalizedPrev) {
-        // Es una nota distinta → limpiamos cualquier ID anterior que pudiera quedar
-        currentArticle.dbRecordId = undefined;
-        const dbIdInput = el('dbRecordId') as HTMLInputElement | null;
-        if (dbIdInput) dbIdInput.value = '';
+      
+      // Si el usuario ya estaba editando (editingDirty = true), NO sobreescribimos la UI
+      // a menos que explícitamente haya presionado "Extraer" (isManualRefresh = true)
+      if (!editingDirty || (msg as any).isManualRefresh) {
+        populateUI(currentArticle);
+        editingDirty = false;
       }
-
-      populateUI(currentArticle);
-      editingDirty = false;
 
       const url = (el('url') as HTMLInputElement).value;
       if (url) performAutoChecks(url).catch(console.error);
@@ -895,10 +951,7 @@ function setupSidePanelMessageListener() {
       const info = el('detected-site');
       if (info) info.textContent = msg.payload.name + ' (' + msg.payload.site + ')';
       const meta = el('detected-meta');
-      if (meta) meta.textContent = 'Listo para extraer. Presiona Grabar o Re-extraer.';
-
-      // Trigger extraction with retries (important for pages that were already loaded)
-      requestExtractionWithRetries(4);
+      if (meta) meta.textContent = 'Listo para extraer. Presiona Grabar o Extraer.';
     }
   });
 }
@@ -936,7 +989,8 @@ async function handleLogin() {
     currentUser = result.usuario;
     const sess = await getCurrentUser();
     currentToken = sess?.token || null;
-    (el('logged-user') as HTMLElement).textContent = currentUser;
+    const logoutBtn = el('btn-logout');
+    if (logoutBtn) logoutBtn.textContent = `👤 ${currentUser}`;
 
     // Guardar o limpiar credenciales recordadas
     const rememberChk = el('login-remember') as HTMLInputElement | null;
@@ -968,6 +1022,31 @@ async function handleLogout() {
   await loadRememberedCredentials();
 }
 
+function playTicSound() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1800, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1000, ctx.currentTime + 0.03);
+    
+    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.03);
+    
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.04);
+  } catch (e) {
+    console.warn('[PortalScrapper] Sound feedback failed:', e);
+  }
+}
+
 async function initMainUI() {
   const sess = await getCurrentUser();
   if (!sess) {
@@ -977,8 +1056,8 @@ async function initMainUI() {
 
   currentUser = sess.usuario;
   currentToken = sess.token;
-  const userLine = el('logged-user');
-  if (userLine) userLine.textContent = currentUser;
+  const logoutBtn = el('btn-logout');
+  if (logoutBtn && currentUser) logoutBtn.textContent = `👤 ${currentUser}`;
   showScreen('main');
 
   // initial detected site
@@ -1079,13 +1158,42 @@ async function initMainUI() {
   }));
 
   wire('btn-logout', handleLogout);
-  wire('btn-generate-link', () => {
-    const id = (currentArticle.dbRecordId || 0);
+  wire('btn-generate-link', withButtonLoading('btn-generate-link', async () => {
+    if (!(await ensureValidSession())) return;
+    if (!currentToken) return;
+
+    const dbIdInput = el('dbRecordId') as HTMLInputElement | null;
+    const dbIdVal = dbIdInput?.value || '';
+    const id = parseInt(dbIdVal, 10) || (currentArticle.dbRecordId || 0);
+
     if (id > 0) {
-      const lnk = `https://api.medialog.com.mx/v1/medialogs/hash/${id}`;
-      navigator.clipboard.writeText(lnk).then(() => showToast('Liga copiada'));
+      try {
+        const hash = await getMedialogHash(currentToken, id);
+        if (hash) {
+          const lnk = `https://www.medialog.com.mx/mx.asp?h=${hash}&E=MnBkanlvYmM=&X=dXlwZGp5b2Jj`;
+          window.open(lnk, '_blank');
+        } else {
+          showToast('No se pudo obtener el hash del medialog');
+        }
+      } catch (err: any) {
+        const handled = await checkAndHandleAuthError(err);
+        if (!handled) {
+          showToast('Error al obtener hash: ' + (err.message || err));
+        }
+      }
     } else {
       showToast('Aún no sincronizado con API');
+    }
+  }));
+  wire('btn-editar', () => {
+    const dbIdInput = el('dbRecordId') as HTMLInputElement | null;
+    const dbIdVal = dbIdInput?.value || '';
+    const numericId = parseInt(dbIdVal, 10);
+    if (!isNaN(numericId) && numericId > 0) {
+      const lnk = `https://www.medialog.com.mx/lgg/EditaNotaScrapper.asp?m=${numericId}`;
+      window.open(lnk, '_blank');
+    } else {
+      showToast('No hay número de medialog válido');
     }
   });
   wire('btn-open-url', () => {
@@ -1093,10 +1201,22 @@ async function initMainUI() {
     if (url) window.open(url, '_blank');
   });
 
-  // Final safety net
-  setTimeout(() => {
-    requestExtractionWithRetries(2);
-  }, 2500);
+  // Listeners para actualizar el estado del botón Editar en tiempo real si el usuario lo escribe manualmente
+  const dbRecordIdInput = el('dbRecordId') as HTMLInputElement | null;
+  if (dbRecordIdInput) {
+    ['input', 'change'].forEach((ev) => {
+      dbRecordIdInput.addEventListener(ev, updateEditarButtonState);
+    });
+  }
+
+  // Register click audio feedback for the 5 main action buttons
+  ['btn-reextract', 'btn-grabar', 'btn-checar', 'btn-editar', 'btn-generate-link'].forEach((id) => {
+    const btn = el(id);
+    if (btn) btn.addEventListener('click', playTicSound);
+  });
+
+  // Inicializar estado del botón Editar
+  updateEditarButtonState();
 
   // Resolution is triggered ONLY from ARTICLE_EXTRACTED listener (the reliable single path).
   // We deliberately removed the direct call that was causing the double-resolve right after reload.

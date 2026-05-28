@@ -127,10 +127,32 @@ function buildArticleFromExtraction(extracted: any): Partial<NewsArticle> {
     status: 'draft',
   };
 }
+let extractionLocked = false;
+let lastExtractedText = '';
 
-async function handleExtractionRequest(): Promise<void> {
+async function handleExtractionRequest(source: 'observer' | 'explicit' = 'explicit', isManualRefresh = false): Promise<void> {
+  if (source === 'observer' && extractionLocked) {
+    console.log('[PortalScrapper] Extraction locked. Skipping passive re-extraction.');
+    return;
+  }
+
   const { result, method, confidence } = runExtractionCascade();
   const partial = buildArticleFromExtraction(result);
+
+  const newText = (partial.texto || '').trim();
+
+  // If this is a passive observer trigger and the text hasn't changed, skip to avoid redundant messages
+  if (source === 'observer' && newText === lastExtractedText) {
+    return;
+  }
+  lastExtractedText = newText;
+
+  // Lock if we extracted a substantial body of text (> 800 chars) and no paywall is detected
+  const textLength = newText.length;
+  if (textLength > 800 && !partial.paywallDetected) {
+    extractionLocked = true;
+    console.log(`[PortalScrapper] Lock activated. Successfully extracted complete article with ${textLength} chars.`);
+  }
 
   const article: Partial<NewsArticle> = {
     ...partial,
@@ -141,7 +163,8 @@ async function handleExtractionRequest(): Promise<void> {
   chrome.runtime.sendMessage({
     type: 'ARTICLE_EXTRACTED',
     payload: article,
-  } as ExtensionMessage);
+    isManualRefresh
+  } as any);
 }
 
 function notifySiteDetected(): void {
@@ -165,7 +188,8 @@ function setupObservers(): void {
 
   const observer = new MutationObserver(
     debounce(() => {
-      // Future enhancement: incremental re-extraction on SPAs
+      // Incremental re-extraction on SPAs
+      handleExtractionRequest('observer');
     })
   );
 
@@ -179,7 +203,11 @@ function setupObservers(): void {
 function setupMessageListener(): void {
   chrome.runtime.onMessage.addListener((msg: ExtensionMessage) => {
     if (msg.type === 'EXTRACT_ARTICLE' || msg.type === 'EXTRACT_NOW') {
-      handleExtractionRequest();
+      if (msg.type === 'EXTRACT_NOW') {
+        extractionLocked = false;
+        lastExtractedText = '';
+      }
+      handleExtractionRequest('explicit', msg.type === 'EXTRACT_NOW');
     }
   });
 }
@@ -187,7 +215,7 @@ function setupMessageListener(): void {
 function init(): void {
   notifySiteDetected();
   setupMessageListener();
-  setupObservers();
+  // setupObservers();
 }
 
 if (document.readyState === 'loading') {

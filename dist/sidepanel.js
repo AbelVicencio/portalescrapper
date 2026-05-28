@@ -470,6 +470,20 @@
       return false;
     }
   }
+  async function getMedialogHash(token, medialogId) {
+    const url = `${BASE_URL}/medialogs/hash/${medialogId}`;
+    const res = await fetchWithTimeout(url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        throw new APIMedialogError(res.status, "Token expirado o inv\xE1lido");
+      }
+      throw new APIMedialogError(res.status, "Error fetching medialog hash");
+    }
+    const json = await res.json();
+    return json?.data?.[0]?.hash || json?.hash || null;
+  }
 
   // src/api/auth.ts
   var STORAGE_KEY_TOKEN = "medialog_token";
@@ -771,6 +785,15 @@
       container.appendChild(div);
     });
   }
+  function updateEditarButtonState() {
+    const dbIdInput = el("dbRecordId");
+    const dbIdVal = dbIdInput?.value || "";
+    const btnEditar = el("btn-editar");
+    if (btnEditar) {
+      const numericId = parseInt(dbIdVal, 10);
+      btnEditar.disabled = !dbIdVal || isNaN(numericId) || numericId <= 0;
+    }
+  }
   function populateUI(article) {
     const setVal = (id, val) => {
       const input = el(id);
@@ -781,7 +804,6 @@
     setVal("emisora", String(article.emisora || ""));
     setVal("portal", String(article.portal ?? article.pendiente ?? ""));
     setVal("emision", String(article.emision || 4659889));
-    setVal("fecha", article.fecha || "");
     setVal("fecha_transcripcion", article.fecha_transcripcion || "");
     setVal("dbRecordId", String(article.dbRecordId || ""));
     setVal("medio", article.medio || "");
@@ -789,6 +811,7 @@
     setVal("texto", article.texto || "");
     renderClasificaciones(article.clasificaciones || []);
     updatePortalHeader();
+    updateEditarButtonState();
   }
   function readFormIntoArticle() {
     const id = currentArticle.id || crypto.randomUUID();
@@ -802,7 +825,7 @@
       emisora: parseInt(getVal("emisora"), 10) || 0,
       emision: parseInt(getVal("emision"), 10) || 4659889,
       fecha: currentArticle.fecha || toMexicoCityLocalISO2(now),
-      fecha_transcripcion: toMexicoCityLocalISO2(getVal("fecha_transcripcion") || getVal("fecha") || now),
+      fecha_transcripcion: toMexicoCityLocalISO2(getVal("fecha_transcripcion") || now),
       usuario: currentUser || "anon",
       evento: 1,
       superabstract: getVal("superabstract"),
@@ -990,16 +1013,23 @@
       currentUrl
     );
     if (duplicadoId && duplicadoId > 0) {
-      article.dbRecordId = duplicadoId;
-      article.status = "synced";
-      await saveArticle(article);
+      currentArticle.dbRecordId = duplicadoId;
+      currentArticle.status = "synced";
+      const articleToSave = readFormIntoArticle();
+      articleToSave.dbRecordId = duplicadoId;
+      articleToSave.status = "synced";
+      await saveArticle(articleToSave);
       try {
         await navigator.clipboard.writeText(String(duplicadoId));
         showToast(`\u26A0\uFE0F Nota EXISTENTE en Medialog (#${duplicadoId}). ID copiado al Clipboard.`, 3e3, "large green");
       } catch (e) {
         showToast(`\u26A0\uFE0F Nota EXISTENTE en Medialog (#${duplicadoId}).`, 3e3, "large green");
       }
-      populateUI(article);
+      const dbIdInput = el("dbRecordId");
+      if (dbIdInput) {
+        dbIdInput.value = String(duplicadoId);
+        updateEditarButtonState();
+      }
       renderHistory();
       updateBadge();
       return;
@@ -1164,7 +1194,7 @@
   async function handleReExtract() {
     if (!await ensureValidSession()) return;
     if (editingDirty) {
-      if (!confirm("Tienes cambios sin guardar. \xBFRe-extraer y sobrescribir?")) return;
+      if (!confirm("Tienes cambios sin guardar. \xBFExtraer y sobrescribir?")) return;
     }
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -1196,6 +1226,39 @@
     chrome.runtime.onMessage.addListener((msg) => {
       if (msg.type === "ARTICLE_EXTRACTED" && msg.payload) {
         const previousUrl = currentArticle.url || "";
+        const newUrl = msg.payload.url || "";
+        const normalizedNew = newUrl.split("#")[0].split("?")[0];
+        const normalizedPrev = previousUrl.split("#")[0].split("?")[0];
+        let isSameDomain = false;
+        try {
+          if (newUrl && previousUrl) {
+            const prevDomain = getBaseDomain(new URL(previousUrl).hostname);
+            const nextDomain = getBaseDomain(new URL(newUrl).hostname);
+            if (prevDomain === nextDomain) isSameDomain = true;
+          }
+        } catch (e) {
+        }
+        if (normalizedNew && normalizedNew !== normalizedPrev) {
+          currentArticle.dbRecordId = void 0;
+          const dbIdInput = el("dbRecordId");
+          if (dbIdInput) {
+            dbIdInput.value = "";
+            updateEditarButtonState();
+          }
+        }
+        if (isSameDomain) {
+          if (msg.payload.emisora === 0) delete msg.payload.emisora;
+          if (msg.payload.emision === 4659889) delete msg.payload.emision;
+          if (!msg.payload.portal) delete msg.payload.portal;
+          if (!msg.payload.nombre_portal) delete msg.payload.nombre_portal;
+          if (!msg.payload.pais) delete msg.payload.pais;
+        } else {
+          currentArticle.emisora = void 0;
+          currentArticle.emision = void 0;
+          currentArticle.portal = void 0;
+          currentArticle.nombre_portal = void 0;
+          currentArticle.pais = void 0;
+        }
         currentArticle = { ...currentArticle, ...msg.payload };
         if (!currentArticle.id) currentArticle.id = crypto.randomUUID();
         if (msg.payload.fecha) {
@@ -1210,16 +1273,10 @@
         if (currentArticle.texto) {
           currentArticle.texto = normalizeTranscription2(currentArticle.texto);
         }
-        const newUrl = currentArticle.url || "";
-        const normalizedNew = newUrl.split("#")[0].split("?")[0];
-        const normalizedPrev = previousUrl.split("#")[0].split("?")[0];
-        if (normalizedNew && normalizedNew !== normalizedPrev) {
-          currentArticle.dbRecordId = void 0;
-          const dbIdInput = el("dbRecordId");
-          if (dbIdInput) dbIdInput.value = "";
+        if (!editingDirty || msg.isManualRefresh) {
+          populateUI(currentArticle);
+          editingDirty = false;
         }
-        populateUI(currentArticle);
-        editingDirty = false;
         const url = el("url").value;
         if (url) performAutoChecks(url).catch(console.error);
         showToast("Art\xEDculo extra\xEDdo");
@@ -1228,8 +1285,7 @@
         const info = el("detected-site");
         if (info) info.textContent = msg.payload.name + " (" + msg.payload.site + ")";
         const meta = el("detected-meta");
-        if (meta) meta.textContent = "Listo para extraer. Presiona Grabar o Re-extraer.";
-        requestExtractionWithRetries(4);
+        if (meta) meta.textContent = "Listo para extraer. Presiona Grabar o Extraer.";
       }
     });
   }
@@ -1262,7 +1318,8 @@
       currentUser = result.usuario;
       const sess = await getCurrentUser();
       currentToken = sess?.token || null;
-      el("logged-user").textContent = currentUser;
+      const logoutBtn = el("btn-logout");
+      if (logoutBtn) logoutBtn.textContent = `\u{1F464} ${currentUser}`;
       const rememberChk = el("login-remember");
       if (rememberChk && rememberChk.checked) {
         await chrome.storage.local.set({
@@ -1289,6 +1346,26 @@
     showScreen("login");
     await loadRememberedCredentials();
   }
+  function playTicSound() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(1800, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1e3, ctx.currentTime + 0.03);
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(1e-3, ctx.currentTime + 0.03);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.04);
+    } catch (e) {
+      console.warn("[PortalScrapper] Sound feedback failed:", e);
+    }
+  }
   async function initMainUI() {
     const sess = await getCurrentUser();
     if (!sess) {
@@ -1297,8 +1374,8 @@
     }
     currentUser = sess.usuario;
     currentToken = sess.token;
-    const userLine = el("logged-user");
-    if (userLine) userLine.textContent = currentUser;
+    const logoutBtn = el("btn-logout");
+    if (logoutBtn && currentUser) logoutBtn.textContent = `\u{1F464} ${currentUser}`;
     showScreen("main");
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.url) {
@@ -1387,22 +1464,57 @@
       }
     }));
     wire("btn-logout", handleLogout);
-    wire("btn-generate-link", () => {
-      const id = currentArticle.dbRecordId || 0;
+    wire("btn-generate-link", withButtonLoading("btn-generate-link", async () => {
+      if (!await ensureValidSession()) return;
+      if (!currentToken) return;
+      const dbIdInput = el("dbRecordId");
+      const dbIdVal = dbIdInput?.value || "";
+      const id = parseInt(dbIdVal, 10) || (currentArticle.dbRecordId || 0);
       if (id > 0) {
-        const lnk = `https://api.medialog.com.mx/v1/medialogs/hash/${id}`;
-        navigator.clipboard.writeText(lnk).then(() => showToast("Liga copiada"));
+        try {
+          const hash = await getMedialogHash(currentToken, id);
+          if (hash) {
+            const lnk = `https://www.medialog.com.mx/mx.asp?h=${hash}&E=MnBkanlvYmM=&X=dXlwZGp5b2Jj`;
+            window.open(lnk, "_blank");
+          } else {
+            showToast("No se pudo obtener el hash del medialog");
+          }
+        } catch (err) {
+          const handled = await checkAndHandleAuthError(err);
+          if (!handled) {
+            showToast("Error al obtener hash: " + (err.message || err));
+          }
+        }
       } else {
         showToast("A\xFAn no sincronizado con API");
+      }
+    }));
+    wire("btn-editar", () => {
+      const dbIdInput = el("dbRecordId");
+      const dbIdVal = dbIdInput?.value || "";
+      const numericId = parseInt(dbIdVal, 10);
+      if (!isNaN(numericId) && numericId > 0) {
+        const lnk = `https://www.medialog.com.mx/lgg/EditaNotaScrapper.asp?m=${numericId}`;
+        window.open(lnk, "_blank");
+      } else {
+        showToast("No hay n\xFAmero de medialog v\xE1lido");
       }
     });
     wire("btn-open-url", () => {
       const url = el("url")?.value.trim();
       if (url) window.open(url, "_blank");
     });
-    setTimeout(() => {
-      requestExtractionWithRetries(2);
-    }, 2500);
+    const dbRecordIdInput = el("dbRecordId");
+    if (dbRecordIdInput) {
+      ["input", "change"].forEach((ev) => {
+        dbRecordIdInput.addEventListener(ev, updateEditarButtonState);
+      });
+    }
+    ["btn-reextract", "btn-grabar", "btn-checar", "btn-editar", "btn-generate-link"].forEach((id) => {
+      const btn = el(id);
+      if (btn) btn.addEventListener("click", playTicSound);
+    });
+    updateEditarButtonState();
     await renderHistory();
   }
   async function init() {

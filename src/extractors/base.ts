@@ -37,14 +37,30 @@ export function mergeResults(results: ExtractorResult[]): Partial<import('../typ
         const isNewSiteSpecific = r.method === 'site-specific';
         const isPrevSiteSpecific = textMethod === 'site-specific';
         const isMuchLonger = r.content.length > (merged.texto.length * 1.3);
+        const isPrevShortTeaser = merged.texto.length < 500;
 
-        // Overwrite existing text if:
-        // 1. The new text is curated/site-specific and is reasonably long (> 150 chars).
-        // 2. The new text is significantly longer (meaning the previous one was likely a teaser or description).
-        if (
-          (isNewSiteSpecific && !isPrevSiteSpecific && r.content.length > 150) ||
-          (isMuchLonger && (!isPrevSiteSpecific || isNewSiteSpecific))
-        ) {
+        let shouldOverwrite = false;
+        if (isNewSiteSpecific && !isPrevSiteSpecific && isPrevShortTeaser && r.content.length > merged.texto.length) {
+          shouldOverwrite = true;
+        } else if (isMuchLonger) {
+          // If the new method is low confidence (generic or meta-tags) and the previous was high confidence (json-ld or site-specific),
+          // only overwrite if the previous text was a short teaser.
+          const isNewLowConfidence = r.method === 'generic' || r.method === 'meta-tags';
+          const isPrevHighConfidence = textMethod === 'json-ld' || textMethod === 'site-specific';
+          
+          if (isNewLowConfidence && isPrevHighConfidence) {
+            if (isPrevShortTeaser) {
+              shouldOverwrite = true;
+            }
+          } else {
+            // Otherwise, follow general rule of allowing it if the previous wasn't site-specific or the new one is site-specific.
+            if (!isPrevSiteSpecific || isNewSiteSpecific) {
+              shouldOverwrite = true;
+            }
+          }
+        }
+
+        if (shouldOverwrite) {
           merged.texto = r.content;
           textMethod = r.method;
         }

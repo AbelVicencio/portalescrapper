@@ -20,7 +20,24 @@
           const isNewSiteSpecific = r.method === "site-specific";
           const isPrevSiteSpecific = textMethod === "site-specific";
           const isMuchLonger = r.content.length > merged.texto.length * 1.3;
-          if (isNewSiteSpecific && !isPrevSiteSpecific && r.content.length > 150 || isMuchLonger && (!isPrevSiteSpecific || isNewSiteSpecific)) {
+          const isPrevShortTeaser = merged.texto.length < 500;
+          let shouldOverwrite = false;
+          if (isNewSiteSpecific && !isPrevSiteSpecific && isPrevShortTeaser && r.content.length > merged.texto.length) {
+            shouldOverwrite = true;
+          } else if (isMuchLonger) {
+            const isNewLowConfidence = r.method === "generic" || r.method === "meta-tags";
+            const isPrevHighConfidence = textMethod === "json-ld" || textMethod === "site-specific";
+            if (isNewLowConfidence && isPrevHighConfidence) {
+              if (isPrevShortTeaser) {
+                shouldOverwrite = true;
+              }
+            } else {
+              if (!isPrevSiteSpecific || isNewSiteSpecific) {
+                shouldOverwrite = true;
+              }
+            }
+          }
+          if (shouldOverwrite) {
             merged.texto = r.content;
             textMethod = r.method;
           }
@@ -168,7 +185,7 @@
         title: "h1.a_t, h1.c_t, h1.article-header__title",
         author: '.a_md_a_n, .author-name, [data-testid="author"]',
         date: "time[datetime]",
-        content: "article p, .a_c p, .article-body p",
+        content: '.a_c p, .article-body p, [data-testid="article-body"] p',
         paywall: ".a_tp, #ctn_freemium_article, .mura-wall, .paywall"
       }
     },
@@ -179,7 +196,7 @@
         title: "h1.title, h1.article-title",
         author: ".sc__author-nota, .author",
         date: "time[datetime], .sc__author--date",
-        content: ".sc__font-paragraph, .story-content p, article p",
+        content: ".sc__font-paragraph, .story-content p, .timeline-card p",
         paywall: ".paywall, .premium-banner"
       }
     },
@@ -188,10 +205,10 @@
       hostPatterns: ["reforma.com"],
       selectors: {
         title: "h1.article-title, #MainContent h1, h1.title",
-        author: ".author, .article-author, .byline",
-        date: "time[datetime], .date",
-        content: ".article-body p, #article-body p",
-        paywall: ".paywall, .subscription-wall"
+        author: '.author, .article-author, .byline, [name="cXenseParse:author"]',
+        date: 'time[datetime], .date, meta[name="cXenseParse:recs:publishtime"]',
+        content: ".gr_texto_articulo, .article-body p, #article-body p",
+        paywall: ".paywall, .subscription-wall, #caja_suscripcion"
       }
     },
     "milenio.com": {
@@ -300,10 +317,16 @@
         if (position & 2) return 1;
         return 0;
       });
-      return sortedNodes.map((n) => n.textContent?.trim()).filter(Boolean).join("\n\n");
+      return sortedNodes.map((n) => {
+        const el = n;
+        return (el.innerText || el.textContent || "").trim();
+      }).filter(Boolean).join("\n\n");
     }
     const nodes = document.querySelectorAll(selector);
-    return Array.from(nodes).map((n) => n.textContent?.trim()).filter(Boolean).join("\n\n");
+    return Array.from(nodes).map((n) => {
+      const el = n;
+      return (el.innerText || el.textContent || "").trim();
+    }).filter(Boolean).join("\n\n");
   }
   function cleanBloombergText(text) {
     const paragraphs = text.split("\n\n").map((p) => p.trim()).filter(Boolean);
@@ -450,9 +473,20 @@
       return true;
     });
     if (filtered.length === 0) return "";
-    let endIndex = filtered.length - 1;
-    for (let i = filtered.length - 1; i >= 0; i--) {
+    let stopIndex = filtered.length;
+    for (let i = 0; i < filtered.length; i++) {
       const p = filtered[i];
+      const lower = p.toLowerCase();
+      if (lower === "lo m\xE1s le\xEDdo" || lower === "lo mas leido" || lower === "temas relacionados" || lower === "m\xE1s informaci\xF3n" || lower === "mas informacion" || lower === "opini\xF3n" || lower === "opinion") {
+        stopIndex = i;
+        break;
+      }
+    }
+    const mainParagraphs = filtered.slice(0, stopIndex);
+    if (mainParagraphs.length === 0) return "";
+    let endIndex = mainParagraphs.length - 1;
+    for (let i = mainParagraphs.length - 1; i >= 0; i--) {
+      const p = mainParagraphs[i];
       const lower = p.toLowerCase();
       if (lower.startsWith("con informaci\xF3n de")) {
         endIndex = i - 1;
@@ -464,7 +498,143 @@
       }
     }
     if (endIndex < 0) return "";
-    return filtered.slice(0, endIndex + 1).join("\n\n");
+    return mainParagraphs.slice(0, endIndex + 1).join("\n\n");
+  }
+  function cleanElPaisText(text) {
+    if (!text) return "";
+    let cleaned = text.replace(/[a-zA-Z0-9\-\.\/_~%?&=#+:]+"(?:\s+[a-zA-Z\-]+="[^"]*")+\s*\/?>/g, "");
+    const lowerText = cleaned.toLowerCase();
+    if (lowerText.includes("compartir en whatsapp") || lowerText.includes("copiar enlace")) {
+      const copyEnlaceIdx = lowerText.lastIndexOf("copiar enlace");
+      if (copyEnlaceIdx !== -1) {
+        const candidate = cleaned.slice(copyEnlaceIdx + "copiar enlace".length).trim();
+        if (candidate.length > 20) {
+          cleaned = candidate;
+        }
+      }
+    }
+    const paragraphs = cleaned.split("\n\n").map((p) => p.trim()).filter(Boolean);
+    const filtered = [];
+    for (const p of paragraphs) {
+      let cleanP = p;
+      const lowerP = p.toLowerCase();
+      if (lowerP.includes("mis comentarios") || lowerP.includes("hazte premium") || lowerP.includes("archivado en")) {
+        const idxs = [
+          lowerP.indexOf("mis comentarios"),
+          lowerP.indexOf("hazte premium"),
+          lowerP.indexOf("archivado en")
+        ].filter((idx) => idx !== -1);
+        if (idxs.length > 0) {
+          const cutIdx = Math.min(...idxs);
+          cleanP = p.slice(0, cutIdx).trim();
+        }
+      }
+      const lower = cleanP.toLowerCase();
+      if (lower.includes("compartir en whatsapp") || lower.includes("compartir en facebook") || lower.includes("compartir en twitter") || lower.includes("copiar enlace") || lower.includes("ir a los comentarios") || lower.includes("a\xF1adir el pa\xEDs") || lower.includes("anadir el pais") || lower.includes("compartir:")) {
+        continue;
+      }
+      if (lower.includes("mis comentarios") || lower.includes("rellena tu nombre") || lower.includes("hazte premium") || lower.includes("completar datos") || lower.includes("ya tengo una suscripci\xF3n") || lower.includes("ya tengo una suscripcion") || lower.includes("archivado en")) {
+        continue;
+      }
+      if (lower.startsWith("m\xE9xico am\xE9rica latinoam\xE9rica") || lower.startsWith("mexico america latinoamerica") || lower.includes("m\xE9xico am\xE9rica latinoam\xE9rica") || lower.includes("mexico america latinoamerica") || lower.includes("sinaloa") && lower.includes("interpol") && (lower.includes("omar garcia harfuch") || lower.includes("omar garc\xEDa harfuch")) && cleanP.length < 200) {
+        continue;
+      }
+      if (cleanP.trim().length > 0) {
+        filtered.push(cleanP.trim());
+      }
+    }
+    if (filtered.length === 0) return "";
+    return filtered.map((p) => p.replace(/\s{2,}/g, " ")).join("\n\n");
+  }
+  function cleanReformaText(text) {
+    const paragraphs = text.split(/\n+/).map((p) => p.trim()).filter(Boolean);
+    return paragraphs.join("\n\n");
+  }
+  function cleanMilenioText(text, authorName = "", titleText = "") {
+    const paragraphs = text.split(/\n+/).map((p) => p.trim()).filter(Boolean);
+    let startIndex = 0;
+    let datelineFound = false;
+    for (let i2 = 0; i2 < paragraphs.length; i2++) {
+      const p = paragraphs[i2];
+      if (p.includes(" / ") && p.match(/\d{2}\.\d{2}\.\d{4}/)) {
+        startIndex = i2 + 1;
+        datelineFound = true;
+        break;
+      }
+    }
+    if (!datelineFound) {
+      const titleClean = titleText.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim().toLowerCase();
+      const authorClean = authorName.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim().toLowerCase();
+      const descEl = document.querySelector('meta[name="description"]');
+      const descText = descEl ? descEl.getAttribute("content") || "" : "";
+      const descClean = descText.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim().toLowerCase();
+      for (let i2 = 0; i2 < paragraphs.length; i2++) {
+        const p = paragraphs[i2];
+        const pClean = p.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim().toLowerCase();
+        if (!pClean) continue;
+        if (titleClean && (pClean === titleClean || pClean.includes(titleClean) || titleClean.includes(pClean))) continue;
+        if (descClean && (pClean === descClean || pClean.includes(descClean) || descClean.includes(pClean))) continue;
+        if (authorClean && pClean.includes(authorClean)) continue;
+        if (pClean.includes("el registro nacional de detenciones detalla que el aseguramiento se realiz")) continue;
+        startIndex = i2;
+        break;
+      }
+    }
+    let endIndex = paragraphs.length - 1;
+    for (let i2 = paragraphs.length - 1; i2 >= startIndex; i2--) {
+      const pLower = paragraphs[i2].toLowerCase();
+      if (pLower.startsWith("tambi\xE9n puedes leer") || pLower.startsWith("tambien puedes leer") || pLower.startsWith("tambi\xE9n puedes ver") || pLower.startsWith("tambien puedes ver") || pLower.startsWith("tambi\xE9n lee") || pLower.startsWith("tambien lee") || pLower.startsWith("te recomendamos") || pLower.startsWith("sigue leyendo") || pLower.startsWith("lee tambi\xE9n") || pLower.startsWith("lee tambien") || pLower.includes("participa en la ola") || pLower.includes("es real. participa")) {
+        endIndex = i2 - 1;
+        break;
+      }
+    }
+    for (let i2 = endIndex; i2 >= startIndex; i2--) {
+      const p = paragraphs[i2];
+      const pLower = p.toLowerCase();
+      if (pLower.startsWith("s\xEDguenos en") || pLower.startsWith("siguenos en") || pLower.includes("tags relacionados") || pLower.includes("queda prohibida la reproducci\xF3n") || pLower.includes("propiedad de milenio diario") || pLower.includes("estudi\xF3 ciencias de la comunicaci\xF3n") || pLower.includes("con m\xE1s de 25 a\xF1os de experiencia") || pLower.includes("premio estatal de periodismo") || pLower.includes("amante de los autos cl\xE1sicos") || pLower.includes("para conocer m\xE1s sobre") || pLower.includes("derechos reservados") || pLower.startsWith("tambi\xE9n puedes leer") || pLower.startsWith("tambien puedes leer") || pLower.startsWith("tambi\xE9n puedes ver") || pLower.startsWith("tambien puedes ver") || pLower.startsWith("te recomendamos") || pLower.startsWith("sigue leyendo") || pLower.startsWith("lee tambi\xE9n") || pLower.startsWith("lee tambien") || pLower.includes("participa en la ola") || pLower.includes("es real. participa")) {
+        endIndex = i2 - 1;
+        continue;
+      }
+      break;
+    }
+    if (startIndex > endIndex) return "";
+    const storyParagraphs = paragraphs.slice(startIndex, endIndex + 1);
+    const filtered = [];
+    let i = 0;
+    while (i < storyParagraphs.length) {
+      const p = storyParagraphs[i];
+      const pLower = p.toLowerCase();
+      const pClean = p.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim().toLowerCase();
+      if (pClean.includes("el registro nacional de detenciones detalla que el aseguramiento se realiz")) {
+        i++;
+        continue;
+      }
+      if (pLower.includes("te recomendamos")) {
+        i++;
+        let skippedCount = 0;
+        while (i < storyParagraphs.length && skippedCount < 5) {
+          const nextP = storyParagraphs[i];
+          if (nextP.length < 250 && !nextP.match(/[.!?]$/)) {
+            if (nextP.match(/["']$/) && !nextP.match(/[.!?]["']$/)) {
+              i++;
+              skippedCount++;
+            } else {
+              i++;
+              skippedCount++;
+            }
+          } else if (nextP.includes("...")) {
+            i++;
+            skippedCount++;
+          } else {
+            break;
+          }
+        }
+        continue;
+      }
+      filtered.push(p);
+      i++;
+    }
+    return filtered.join("\n\n");
   }
   function extractSiteSpecific(host) {
     const result = { method: "site-specific", confidence: 0 };
@@ -485,6 +655,15 @@
     }
     if (host.includes("eluniversal.com.mx") && contentText) {
       contentText = cleanElUniversalText(contentText);
+    }
+    if (host.includes("reforma.com") && contentText) {
+      contentText = cleanReformaText(contentText);
+    }
+    if (host.includes("milenio.com") && contentText) {
+      contentText = cleanMilenioText(contentText, result.author, result.title);
+    }
+    if (host.includes("elpais.com") && contentText) {
+      contentText = cleanElPaisText(contentText);
     }
     result.content = contentText;
     result.section = sel.section ? querySelectorText(sel.section) : void 0;
@@ -791,6 +970,17 @@
     const generic = extractGeneric();
     if (generic.confidence > 0) results.push(generic);
     const merged = mergeResults(results);
+    if (window.location.hostname.includes("milenio.com") && merged.texto) {
+      const title = merged.superabstract || "";
+      const author = merged.autor || "";
+      merged.texto = cleanMilenioText(merged.texto, author, title);
+    }
+    if (window.location.hostname.includes("eluniversal.com.mx") && merged.texto) {
+      merged.texto = cleanElUniversalText(merged.texto);
+    }
+    if (window.location.hostname.includes("elpais.com") && merged.texto) {
+      merged.texto = cleanElPaisText(merged.texto);
+    }
     let overallMethod = "manual";
     let overallConfidence = 0;
     for (const r of results) {
@@ -799,7 +989,7 @@
         overallMethod = r.method;
       }
     }
-    if (Object.keys(merged).length === 0) {
+    if (Object.keys(merged).length === 0 || !merged.superabstract && !merged.texto && !merged.url) {
       return { result: {}, method: "manual", confidence: 0 };
     }
     merged.extractionMethod = overallMethod;
@@ -931,9 +1121,25 @@
       status: "draft"
     };
   }
-  async function handleExtractionRequest() {
+  var extractionLocked = false;
+  var lastExtractedText = "";
+  async function handleExtractionRequest(source = "explicit", isManualRefresh = false) {
+    if (source === "observer" && extractionLocked) {
+      console.log("[PortalScrapper] Extraction locked. Skipping passive re-extraction.");
+      return;
+    }
     const { result, method, confidence } = runExtractionCascade();
     const partial = buildArticleFromExtraction(result);
+    const newText = (partial.texto || "").trim();
+    if (source === "observer" && newText === lastExtractedText) {
+      return;
+    }
+    lastExtractedText = newText;
+    const textLength = newText.length;
+    if (textLength > 800 && !partial.paywallDetected) {
+      extractionLocked = true;
+      console.log(`[PortalScrapper] Lock activated. Successfully extracted complete article with ${textLength} chars.`);
+    }
     const article = {
       ...partial,
       extractionMethod: method,
@@ -941,7 +1147,8 @@
     };
     chrome.runtime.sendMessage({
       type: "ARTICLE_EXTRACTED",
-      payload: article
+      payload: article,
+      isManualRefresh
     });
   }
   function notifySiteDetected() {
@@ -953,35 +1160,20 @@
       });
     }
   }
-  function setupObservers() {
-    const debounce = (fn, delay = 1200) => {
-      let t;
-      return (...args) => {
-        clearTimeout(t);
-        t = window.setTimeout(() => fn(...args), delay);
-      };
-    };
-    const observer = new MutationObserver(
-      debounce(() => {
-      })
-    );
-    observer.observe(document.body || document.documentElement, {
-      childList: true,
-      subtree: true,
-      attributes: false
-    });
-  }
   function setupMessageListener() {
     chrome.runtime.onMessage.addListener((msg) => {
       if (msg.type === "EXTRACT_ARTICLE" || msg.type === "EXTRACT_NOW") {
-        handleExtractionRequest();
+        if (msg.type === "EXTRACT_NOW") {
+          extractionLocked = false;
+          lastExtractedText = "";
+        }
+        handleExtractionRequest("explicit", msg.type === "EXTRACT_NOW");
       }
     });
   }
   function init() {
     notifySiteDetected();
     setupMessageListener();
-    setupObservers();
   }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);

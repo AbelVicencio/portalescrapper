@@ -1,7 +1,7 @@
 import { ExtractorResult, mergeResults, createEmptyResult } from './base';
 import { extractJsonLd } from './jsonld';
 import { extractMetaTags } from './meta';
-import { extractSiteSpecific } from './siteSpecific';
+import { extractSiteSpecific, cleanMilenioText, cleanElUniversalText, cleanElPaisText } from './siteSpecific';
 import { extractGeneric } from './generic';
 
 /**
@@ -39,6 +39,19 @@ export function runExtractionCascade(): { result: Partial<import('../types').New
 
   const merged = mergeResults(results);
 
+  // Post-procesamiento específico por portal en el texto final
+  if (window.location.hostname.includes('milenio.com') && merged.texto) {
+    const title = merged.superabstract || '';
+    const author = merged.autor || '';
+    merged.texto = cleanMilenioText(merged.texto, author, title);
+  }
+  if (window.location.hostname.includes('eluniversal.com.mx') && merged.texto) {
+    merged.texto = cleanElUniversalText(merged.texto);
+  }
+  if (window.location.hostname.includes('elpais.com') && merged.texto) {
+    merged.texto = cleanElPaisText(merged.texto);
+  }
+
   let overallMethod: string = 'manual';
   let overallConfidence = 0;
   for (const r of results) {
@@ -48,7 +61,7 @@ export function runExtractionCascade(): { result: Partial<import('../types').New
     }
   }
 
-  if (Object.keys(merged).length === 0) {
+  if (Object.keys(merged).length === 0 || (!merged.superabstract && !merged.texto && !merged.url)) {
     return { result: {}, method: 'manual', confidence: 0 };
   }
 

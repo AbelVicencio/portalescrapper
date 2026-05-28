@@ -435,3 +435,18 @@ export async function healthCheck(): Promise<boolean> {
     }
   }
 
+  export async function getMedialogHash(token: string, medialogId: number): Promise<string | null> {
+    const url = `${BASE_URL}/medialogs/hash/${medialogId}`;
+    const res = await fetchWithTimeout(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        throw new APIMedialogError(res.status, 'Token expirado o inválido');
+      }
+      throw new APIMedialogError(res.status, 'Error fetching medialog hash');
+    }
+    const json = await res.json();
+    return json?.data?.[0]?.hash || json?.hash || null;
+  }
+

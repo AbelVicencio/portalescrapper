@@ -1,18 +1,20 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PortalScrapper</title>
   <link rel="stylesheet" href="sidepanel.css">
 </head>
+
 <body>
   <div class="container">
 
     <!-- LOGIN SCREEN -->
     <div id="login-screen">
       <header>
-        <h1>📰 PortalScrapper <span id="login-version">v1.0.92</span></h1>
+        <h1>📰 PortalScrapper <span id="login-version">v1.0.118</span></h1>
       </header>
       <div class="login-box">
         <h3>Iniciar Sesión — API Medialog</h3>
@@ -35,50 +37,51 @@
 
     <!-- MAIN APPLICATION SCREEN -->
     <div id="main-screen">
-      <header>
-        <h1>📰 PortalScrapper <span id="version">v1.0.8</span> ⚙️</h1>
-        <div style="display:flex; gap:4px; align-items:center;">
-          <button id="theme-toggle" class="theme-toggle" title="Cambiar tema">🌙</button>
-          <button id="btn-logout" class="secondary">Cerrar Sesión</button>
+      <div class="sticky-header">
+        <header>
+          <h1>📰 PortalScrapper <span id="version">v1.0.8</span> ⚙️</h1>
+          <div style="display:flex; gap:4px; align-items:center;">
+            <button id="theme-toggle" class="theme-toggle" title="Cambiar tema">🌙</button>
+            <button id="btn-logout" class="secondary">Cerrar Sesión</button>
+          </div>
+        </header>
+
+        <!-- Main action buttons moved up -->
+        <div class="actions" style="margin-bottom:10px; display:flex; gap:6px;">
+          <button id="btn-reextract" style="flex:1;">🔄 Extraer</button>
+          <button id="btn-grabar" style="flex:1;">💾 Grabar</button>
+          <button id="btn-checar" style="flex:1;">🔍 Buscar</button>
+          <button id="btn-editar" style="flex:1;">✏️ Editar</button>
+          <button id="btn-generate-link" style="flex:1;">🔗 Link</button>
         </div>
-      </header>
 
-      <div id="user-line" style="margin-bottom:8px; display:flex; align-items:center; justify-content:space-between;">
-        <div>👤 <span id="logged-user">–</span></div>
-      </div>
-
-      <!-- Main action buttons moved up -->
-      <div class="actions" style="margin-bottom:10px; display:flex; gap:6px;">
-        <button id="btn-grabar" style="flex:1;">💾 Grabar API</button>
-        <button id="btn-checar" class="secondary" style="flex:1;">🔍 Checar</button>
-        <button id="btn-reextract" class="secondary" style="flex:1;">🔄 Re-extraer</button>
-        <button id="btn-generate-link" class="secondary" style="flex:1;">🔗 Generar Liga</button>
-      </div>
-
-      <!-- Combined horizontal info row -->
-      <div style="display:flex; gap:12px; align-items:center; margin-bottom:10px; font-size:13px;">
-        <div id="detected-info" style="flex:1; min-width:0;">
-          <strong id="detected-site">—</strong>
-          <span id="detected-meta" style="font-size:11px; color:#888; margin-left:6px;">Esperando página...</span>
-        </div>
-        <div id="portal-header" style="display:none; background:#1c1c30; padding:4px 8px; border-radius:4px; font-weight:600; white-space:nowrap;">
-          <span id="portal-name"></span>
-          <span id="portal-country" style="font-size:11px; color:#888; margin-left:4px;"></span>
+        <!-- Combined horizontal info row -->
+        <div style="display:flex; gap:12px; align-items:center; margin-bottom:10px; font-size:13px;">
+          <div id="detected-info" style="flex:1; min-width:0;">
+            <strong id="detected-site">—</strong>
+            <span id="detected-meta" style="font-size:11px; color:#888; margin-left:6px;">Esperando página...</span>
+          </div>
+          <div id="portal-header"
+            style="display:none; background:#1c1c30; padding:4px 8px; border-radius:4px; font-weight:600; white-space:nowrap;">
+            <span id="portal-name"></span>
+            <span id="portal-country" style="font-size:11px; color:#888; margin-left:4px;"></span>
+          </div>
         </div>
       </div>
 
       <!-- FORM -->
       <div class="field">
-        <div class="label">Superabstract (Encabezado) <button class="copy-btn" data-target="superabstract">📋</button></div>
+        <div class="label">Superabstract (Encabezado) <button class="copy-btn" data-target="superabstract">📋</button>
+        </div>
         <textarea id="superabstract" rows="2" placeholder="Título de la nota"></textarea>
       </div>
 
       <div class="field">
-        <div class="label">Abstract (URL de la nota) <button class="copy-btn" data-target="url">📋</button><button id="btn-open-url" class="copy-btn" title="Abrir en nueva pestaña">🔗</button></div>
+        <div class="label">Abstract (URL de la nota) <button class="copy-btn" data-target="url">📋</button><button
+            id="btn-open-url" class="copy-btn" title="Abrir en nueva pestaña">🔗</button></div>
         <input id="url" placeholder="https://...">
       </div>
-
-      <div class="field-row">
+      <div class="compact-grid">
         <div>
           <div class="label">Emisora</div>
           <input id="emisora" type="number" placeholder="Auto">
@@ -91,9 +94,6 @@
           <div class="label">Medialog ID</div>
           <input id="dbRecordId" type="number" placeholder="Generado">
         </div>
-      </div>
-
-      <div class="field-row">
         <div>
           <div class="label">Emisión</div>
           <input id="emision" type="number" value="4659889">
@@ -106,9 +106,6 @@
           <div class="label">Fecha publicación</div>
           <input id="fecha_transcripcion" placeholder="2026-05-20T14:30:00">
         </div>
-      </div>
-
-      <div class="field-row">
         <div>
           <div class="label">Medio</div>
           <input id="medio" placeholder="Portal">
@@ -117,10 +114,7 @@
           <div class="label">Autor</div>
           <input id="autor" placeholder="Autor">
         </div>
-        <div>
-          <div class="label">Fecha grabación</div>
-          <input id="fecha" placeholder="Auto" readonly style="background-color: var(--bg-tertiary, #222); color: #888;" title="Se generará al grabar">
-        </div>
+
       </div>
 
       <div class="field">
@@ -129,7 +123,8 @@
       </div>
 
       <!-- History panel -->
-      <div class="history-label" style="font-size:12px; color:#888; margin-top:16px; margin-bottom:4px;">Historial local / Drafts</div>
+      <div class="history-label" style="font-size:12px; color:#888; margin-top:16px; margin-bottom:4px;">Historial local
+        / Drafts</div>
       <div id="history-list" class="history"></div>
 
       <div class="actions" style="margin-top:8px;">
@@ -139,8 +134,8 @@
       </div>
 
       <!-- Botón especial para forzar pruebas de chequeo por API (limpia TODO storage) -->
-      <button id="btn-clear-storage" class="secondary" 
-              style="width:100%; margin-top:6px; background:#4a1f1f; font-size:11px;">
+      <button id="btn-clear-storage" class="secondary"
+        style="width:100%; margin-top:6px; background:#4a1f1f; font-size:11px;">
         🗑️ Borrar storage local completo (forzar pruebas API)
       </button>
     </div>
@@ -151,4 +146,5 @@
 
   <script src="../../dist/sidepanel.js" type="module"></script>
 </body>
+
 </html>
