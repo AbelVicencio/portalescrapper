@@ -1172,6 +1172,12 @@ async function initMainUI() {
         if (hash) {
           const lnk = `https://www.medialog.com.mx/mx.asp?h=${hash}&E=MnBkanlvYmM=&X=dXlwZGp5b2Jj`;
           window.open(lnk, '_blank');
+          try {
+            await navigator.clipboard.writeText(lnk);
+            showToast('✅ Link copiado al Clipboard y abierto en nueva pestaña', 3000, 'large');
+          } catch (e) {
+            showToast('Link abierto en nueva pestaña (error al copiar al Clipboard)', 3000);
+          }
         } else {
           showToast('No se pudo obtener el hash del medialog');
         }

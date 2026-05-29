@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PortalScrapper",
-  "version": "1.0.118",
+  "version": "1.0.119",
   "description": "Side Panel extension for passive capture of news articles from major portals with direct persistence to API Medialog.",
   "permissions": [
     "sidePanel",
