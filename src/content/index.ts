@@ -1,6 +1,7 @@
 import { runExtractionCascade } from '../extractors/cascade';
 import type { NewsArticle, ExtensionMessage } from '../types';
 import { generateUUID } from '../utils/uuid';
+import { getCleanSnapshotHTML } from '../extractors/snapshot';
 
 function getHostname(): string {
   return window.location.hostname.replace('www.', '');
@@ -201,13 +202,23 @@ function setupObservers(): void {
 }
 
 function setupMessageListener(): void {
-  chrome.runtime.onMessage.addListener((msg: ExtensionMessage) => {
+  chrome.runtime.onMessage.addListener((msg: ExtensionMessage, sender, sendResponse) => {
     if (msg.type === 'EXTRACT_ARTICLE' || msg.type === 'EXTRACT_NOW') {
       if (msg.type === 'EXTRACT_NOW') {
         extractionLocked = false;
         lastExtractedText = '';
       }
       handleExtractionRequest('explicit', msg.type === 'EXTRACT_NOW');
+    } else if (msg.type === 'GET_CLEAN_SNAPSHOT') {
+      getCleanSnapshotHTML()
+        .then((result) => {
+          sendResponse(result);
+        })
+        .catch((err) => {
+          console.error('[PortalScrapper] Error generating clean snapshot:', err);
+          sendResponse({ error: err.message || String(err) });
+        });
+      return true; // Keep channel open for async response
     }
   });
 }

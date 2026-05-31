@@ -544,6 +544,39 @@
   var currentUser = null;
   var currentToken = null;
   var editingDirty = false;
+  var hasRegisteredTabListeners = false;
+  function setupTabChangeListeners() {
+    if (hasRegisteredTabListeners) return;
+    hasRegisteredTabListeners = true;
+    chrome.tabs.onActivated.addListener(async (activeInfo) => {
+      try {
+        const tab = await chrome.tabs.get(activeInfo.tabId);
+        if (tab && tab.url) {
+          handleTabChanged(tab);
+        }
+      } catch (e) {
+        console.warn("[PortalScrapper] Error onActivated:", e);
+      }
+    });
+    chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+      if (changeInfo.status === "complete" && tab.active) {
+        handleTabChanged(tab);
+      }
+    });
+  }
+  async function handleTabChanged(tab) {
+    if (!tab.url || tab.url.startsWith("chrome://") || tab.url.startsWith("edge://") || tab.url.startsWith("about:")) return;
+    try {
+      const host = new URL(tab.url).hostname;
+      const siteEl = el("detected-site");
+      if (siteEl) siteEl.textContent = host;
+      lastResolvedDomain = "";
+      lastCheckedUrl = "";
+      console.log(`[PortalScrapper] Tab changed/reloaded to: ${host}. Waiting for explicit extraction click.`);
+    } catch (e) {
+      console.warn("[PortalScrapper] handleTabChanged error:", e);
+    }
+  }
   var el = (id) => document.getElementById(id);
   var THEME_KEY = "portalescrapper_theme";
   var ZOOM_KEY = "portalescrapper_zoom";
@@ -1191,6 +1224,98 @@
       }
     }
   }
+  async function handleGeneratePDF() {
+    if (!await ensureValidSession()) return;
+    const btn = el("btn-pdf");
+    const originalText = btn ? btn.textContent : "\u{1F4C4} PDF";
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Generando PDF...";
+    }
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) {
+        showToast("No hay pesta\xF1a activa para generar snapshot");
+        return;
+      }
+      const response = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          { type: "GET_CLEAN_SNAPSHOT" },
+          (res) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else if (res && !res.ok) {
+              reject(new Error(res.error || "Error al obtener snapshot"));
+            } else {
+              resolve(res);
+            }
+          }
+        );
+      });
+      if (!response || !response.payload) {
+        throw new Error("No se recibi\xF3 el contenido del snapshot");
+      }
+      const { html } = response.payload;
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) {
+        showToast("Error: Ventana emergente bloqueada por el navegador");
+        return;
+      }
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      const closeBtn = printWindow.document.getElementById("btn-snapshot-close");
+      const printBtn = printWindow.document.getElementById("btn-snapshot-print");
+      if (closeBtn) {
+        closeBtn.addEventListener("click", () => {
+          printWindow.close();
+        });
+      }
+      if (printBtn) {
+        printBtn.addEventListener("click", () => {
+          printWindow.print();
+        });
+      }
+      const saveBtn = printWindow.document.getElementById("btn-snapshot-save");
+      if (saveBtn) {
+        saveBtn.addEventListener("click", () => {
+          const cleanTitle = (response.payload.title || "snapshot").replace(/[/\\?%*:|"<>]/g, "-").trim();
+          const filename = `${cleanTitle}.html`;
+          let savedHtml = html;
+          try {
+            const docParser = new DOMParser().parseFromString(html, "text/html");
+            const actionBar = docParser.querySelector(".action-bar");
+            if (actionBar) {
+              actionBar.remove();
+            }
+            savedHtml = "<!DOCTYPE html>\n" + docParser.documentElement.outerHTML;
+          } catch (e) {
+            console.warn("[PortalScrapper] Error cleaning action-bar from saved HTML:", e);
+          }
+          const blob = new Blob([savedHtml], { type: "text/html;charset=utf-8" });
+          const url = URL.createObjectURL(blob);
+          const a = printWindow.document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          printWindow.document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            printWindow.document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          }, 100);
+        });
+      }
+      showToast("Snapshot generado con \xE9xito");
+    } catch (err) {
+      console.error("[PortalScrapper] PDF generation error:", err);
+      showToast("Error al generar PDF: " + (err.message || err));
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    }
+  }
   async function handleReExtract() {
     if (!await ensureValidSession()) return;
     if (editingDirty) {
@@ -1334,6 +1459,7 @@
         await chrome.storage.local.remove(["remembered_pass"]);
       }
       showScreen("main");
+      await initMainUI();
       await renderHistory();
     } else {
       if (errorBox) errorBox.textContent = result.error || "Credenciales inv\xE1lidas";
@@ -1377,6 +1503,7 @@
     const logoutBtn = el("btn-logout");
     if (logoutBtn && currentUser) logoutBtn.textContent = `\u{1F464} ${currentUser}`;
     showScreen("main");
+    setupTabChangeListeners();
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.url) {
       try {
@@ -1510,13 +1637,14 @@
       const url = el("url")?.value.trim();
       if (url) window.open(url, "_blank");
     });
+    wire("btn-pdf", handleGeneratePDF);
     const dbRecordIdInput = el("dbRecordId");
     if (dbRecordIdInput) {
       ["input", "change"].forEach((ev) => {
         dbRecordIdInput.addEventListener(ev, updateEditarButtonState);
       });
     }
-    ["btn-reextract", "btn-grabar", "btn-checar", "btn-editar", "btn-generate-link"].forEach((id) => {
+    ["btn-reextract", "btn-grabar", "btn-checar", "btn-editar", "btn-generate-link", "btn-pdf"].forEach((id) => {
       const btn = el(id);
       if (btn) btn.addEventListener("click", playTicSound);
     });

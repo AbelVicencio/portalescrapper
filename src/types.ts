@@ -62,6 +62,12 @@ export interface SiteConfig {
     section?: string;
     paywall?: string;
   };
+  brandColor?: string;
+  logoHtml?: string;
+  logoAsset?: string;
+  contentBgColor?: string;
+  bodyFontFamily?: string;
+  titleFontFamily?: string;
 }
 
 export type ExtensionMessage =
@@ -81,4 +87,5 @@ export type ExtensionMessage =
   | { type: 'SITE_DETECTED'; payload: { site: string; name: string } }
   | { type: 'NO_ARTICLE_FOUND' }
   | { type: 'UPDATE_BADGE'; payload: { count: number } }
-  | { type: 'EXTRACT_NOW' }; // internal signal from side-panel to content script to trigger cascade
+  | { type: 'EXTRACT_NOW' }
+  | { type: 'GET_CLEAN_SNAPSHOT' }; // internal signal to generate print-friendly snapshot HTML

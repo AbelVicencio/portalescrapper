@@ -26,6 +26,46 @@ let currentArticle: Partial<NewsArticle> = {};
 let currentUser: string | null = null;
 let currentToken: string | null = null;
 let editingDirty = false;
+let hasRegisteredTabListeners = false;
+
+function setupTabChangeListeners() {
+  if (hasRegisteredTabListeners) return;
+  hasRegisteredTabListeners = true;
+
+  chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    try {
+      const tab = await chrome.tabs.get(activeInfo.tabId);
+      if (tab && tab.url) {
+        handleTabChanged(tab);
+      }
+    } catch (e) {
+      console.warn('[PortalScrapper] Error onActivated:', e);
+    }
+  });
+
+  chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+    if (changeInfo.status === 'complete' && tab.active) {
+      handleTabChanged(tab);
+    }
+  });
+}
+
+async function handleTabChanged(tab: chrome.tabs.Tab) {
+  if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('edge://') || tab.url.startsWith('about:')) return;
+  try {
+    const host = new URL(tab.url).hostname;
+    const siteEl = el('detected-site');
+    if (siteEl) siteEl.textContent = host;
+
+    // Reset resolving states to allow autochecks
+    lastResolvedDomain = '';
+    lastCheckedUrl = '';
+
+    console.log(`[PortalScrapper] Tab changed/reloaded to: ${host}. Waiting for explicit extraction click.`);
+  } catch (e) {
+    console.warn('[PortalScrapper] handleTabChanged error:', e);
+  }
+}
 
 const el = (id: string) => document.getElementById(id) as HTMLElement | null;
 
@@ -835,6 +875,115 @@ async function handleGrabarAPI() {
   }
 }
 
+async function handleGeneratePDF() {
+  if (!(await ensureValidSession())) return;
+
+  const btn = el('btn-pdf') as HTMLButtonElement | null;
+  const originalText = btn ? btn.textContent : '📄 PDF';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Generando PDF...';
+  }
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) {
+      showToast('No hay pestaña activa para generar snapshot');
+      return;
+    }
+
+    const response = await new Promise<any>((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        { type: 'GET_CLEAN_SNAPSHOT' },
+        (res) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else if (res && !res.ok) {
+            reject(new Error(res.error || 'Error al obtener snapshot'));
+          } else {
+            resolve(res);
+          }
+        }
+      );
+    });
+
+    if (!response || !response.payload) {
+      throw new Error('No se recibió el contenido del snapshot');
+    }
+
+    const { html } = response.payload;
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      showToast('Error: Ventana emergente bloqueada por el navegador');
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+
+    const closeBtn = printWindow.document.getElementById('btn-snapshot-close');
+    const printBtn = printWindow.document.getElementById('btn-snapshot-print');
+
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        printWindow.close();
+      });
+    }
+
+    if (printBtn) {
+      printBtn.addEventListener('click', () => {
+        printWindow.print();
+      });
+    }
+
+    const saveBtn = printWindow.document.getElementById('btn-snapshot-save');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', () => {
+        const cleanTitle = (response.payload.title || 'snapshot').replace(/[/\\?%*:|"<>]/g, '-').trim();
+        const filename = `${cleanTitle}.html`;
+        
+        let savedHtml = html;
+        try {
+          const docParser = new DOMParser().parseFromString(html, 'text/html');
+          const actionBar = docParser.querySelector('.action-bar');
+          if (actionBar) {
+            actionBar.remove();
+          }
+          savedHtml = '<!DOCTYPE html>\n' + docParser.documentElement.outerHTML;
+        } catch (e) {
+          console.warn('[PortalScrapper] Error cleaning action-bar from saved HTML:', e);
+        }
+
+        const blob = new Blob([savedHtml], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = printWindow.document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        printWindow.document.body.appendChild(a);
+        a.click();
+        
+        setTimeout(() => {
+          printWindow.document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 100);
+      });
+    }
+
+    showToast('Snapshot generado con éxito');
+  } catch (err: any) {
+    console.error('[PortalScrapper] PDF generation error:', err);
+    showToast('Error al generar PDF: ' + (err.message || err));
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
+}
+
 async function handleReExtract() {
   if (!(await ensureValidSession())) return;
   if (editingDirty) {
@@ -1008,6 +1157,7 @@ async function handleLogin() {
     }
 
     showScreen('main');
+    await initMainUI();
     await renderHistory();
   } else {
     if (errorBox) errorBox.textContent = result.error || 'Credenciales inválidas';
@@ -1059,6 +1209,9 @@ async function initMainUI() {
   const logoutBtn = el('btn-logout');
   if (logoutBtn && currentUser) logoutBtn.textContent = `👤 ${currentUser}`;
   showScreen('main');
+
+  // Set up dynamic tab state listeners
+  setupTabChangeListeners();
 
   // initial detected site
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -1206,6 +1359,7 @@ async function initMainUI() {
     const url = (el('url') as HTMLInputElement | null)?.value.trim();
     if (url) window.open(url, '_blank');
   });
+  wire('btn-pdf', handleGeneratePDF);
 
   // Listeners para actualizar el estado del botón Editar en tiempo real si el usuario lo escribe manualmente
   const dbRecordIdInput = el('dbRecordId') as HTMLInputElement | null;
@@ -1215,8 +1369,8 @@ async function initMainUI() {
     });
   }
 
-  // Register click audio feedback for the 5 main action buttons
-  ['btn-reextract', 'btn-grabar', 'btn-checar', 'btn-editar', 'btn-generate-link'].forEach((id) => {
+  // Register click audio feedback for the action buttons
+  ['btn-reextract', 'btn-grabar', 'btn-checar', 'btn-editar', 'btn-generate-link', 'btn-pdf'].forEach((id) => {
     const btn = el(id);
     if (btn) btn.addEventListener('click', playTicSound);
   });

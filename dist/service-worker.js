@@ -37,7 +37,8 @@
     "EXPORT_JSON",
     "EXPORT_CSV",
     "GRABAR_API",
-    "EXTRACT_ARTICLE"
+    "EXTRACT_ARTICLE",
+    "GET_CLEAN_SNAPSHOT"
   ];
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || !HANDLED_MESSAGE_TYPES.includes(msg.type)) {
@@ -87,6 +88,15 @@
               });
             }
             sendResponse({ ok: true });
+            break;
+          }
+          case "GET_CLEAN_SNAPSHOT": {
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!tab?.id) {
+              throw new Error("No active tab found");
+            }
+            const response = await chrome.tabs.sendMessage(tab.id, { type: "GET_CLEAN_SNAPSHOT" });
+            sendResponse({ ok: true, payload: response });
             break;
           }
         }
