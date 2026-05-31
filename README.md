@@ -86,6 +86,15 @@ Si se encuentra un registro idéntico, la extensión **detiene el guardado**, as
 ### 5. Clasificaciones Automáticas (Relaciones)
 Configurable directamente en [src/config/portalClassifications.ts](file:///c:/Users/abelv/OneDrive/Code/portalescrapper/src/config/portalClassifications.ts). Tras un guardado exitoso en el backend de Medialog, la extensión realiza peticiones en ráfaga a `POST /v1/relaciones/medialogs` para vincular clasificaciones temáticas automáticamente en base al ID del portal resuelto (ej. *El País* mapea automáticamente la clasificación `25609`).
 
+### 6. 📸 Generador de Snapshots Premium (HTML/PDF)
+La extensión cuenta con un motor avanzado de previsualización e impresión (`src/extractors/snapshot.ts`) que genera documentos autocontenidos listos para archivar o imprimir a PDF con un diseño editorial de alta gama:
+* **Resolución Genérica Multicapa de Logotipos:** Busca y extrae de forma inteligente el logotipo de la marca del portal de origen sin depender de configuraciones estáticas. Evalúa clases de cabeceras, enlaces de inicio (`href="/"`) y metadatos semánticos en las imágenes o SVGs del DOM (soportando portales SPA complejos como PressReader y Reuters).
+* **Conversión Base64 Automática:** Para garantizar que el archivo HTML sea 100% autocontenido y nunca se rompan los gráficos al visualizarse offline, descarga dinámicamente recursos de imagen de logotipos relativos/absolutos y los incrusta directamente en el código usando Base64, aplicando filtros para descartar redireccionamientos HTML de SPAs.
+* **Preservación del Color de Marca en Impresión:** Utiliza propiedades CSS avanzadas (`print-color-adjust: exact`) en la hoja de estilos `@media print` para asegurar que las barras de marca oscuras y los SVGs de logotipos conserven su color original al exportarse como PDF.
+* **Filtros Genéricos de Promociones y CTA:** Elimina de manera proactiva anuncios, banners de suscripción, paywalls, boletines informativos y elementos marcados con `.hide-for-print` (probado en Washington Post y El Universal).
+* **Metadatos e Integridad para Mensajería:** Incluye etiquetas OpenGraph (`og:*`), Twitter Cards y Schema.org JSON-LD estructurado en la cabecera. Añade además `<meta name="theme-color">` dinámico que colorea la barra lateral de vista previa al compartirse en WhatsApp, Telegram, Slack o Discord.
+* **Descargas de Archivo Histórico Limpias:** Al presionar **Guardar HTML**, la extensión limpia el código al vuelo con `DOMParser` para eliminar la barra interactiva de control (`❌ Cerrar`, `💾 Guardar HTML`, `🖨️ Imprimir`) entregando un documento final pulido y enfocado exclusivamente en la nota periodística.
+
 ---
 
 ## 🛠️ Guía para Agentes de IA (Desarrollo y Mantenimiento)

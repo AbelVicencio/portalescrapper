@@ -44,6 +44,7 @@ Chrome/Edge extension (Manifest V3) with a **Side Panel** UI for passive news ar
 
 - **`src/extractors/cascade.ts`**: Orchestrates the 4-layer extraction cascade.
 - **`src/extractors/siteSpecific.ts`**: Contains `SITE_CONFIGS` with CSS selectors for each supported news portal.
+- **`src/extractors/snapshot.ts`**: Generates high-end, self-contained clean HTML/PDF snapshots with Base64 embedded assets, print layout sheets, promotional cleaners, and rich Schema/social meta wrappers.
 - **`src/storage/store.ts`**: Handles CRUD operations for articles in `chrome.storage.local`.
 - **`src/types.ts`**: The source of truth for `NewsArticle`, `SiteConfig`, and `ExtensionMessage` types.
 - **`src/sidepanel/sidepanel.ts`**: Main UI logic, form handling, duplicate prevention, session management, clipboard operations.
@@ -159,6 +160,11 @@ export const PORTAL_CLASSIFICATIONS: Record<number, number[]> = {
 - **Session Expiry**: Always check `getCurrentUser()` before network calls. On 401, log out cleanly.
 - **PressReader is a SPA**: The HTML source is empty — all content is JavaScript-rendered. Our content script runs at `document_idle` and sees the rendered DOM, but `MutationObserver` delays may be needed for dynamic article loading.
 - **Generic extractor on non-news sites**: The content script injects on ALL HTTPS sites now. It's passive (only extracts on request), but `detectSite()` will return a generic result for any page with a path. This is by design.
+- **Manual-Only Extraction**: Extraction is strictly on-demand (triggered exclusively when the user clicks 'Extraer' in the sidepanel). Automatic extraction on tab navigation or page reload is disabled to avoid unwanted captures.
+- **SPA relative assets (e.g. PressReader)**: Relative image references (`images/be-ft-logo.svg`) can resolve improperly or hit SPA shell pages returning HTML. During snapshotting, always access the fully qualified URL from the live element property `.src` and check response content-types (rejecting `text/html`) before attempting Base64 conversion.
+- **Duplicate Images in Body**: Portals often repeat the article's hero image inside the first paragraph of the body. Always use URL base matching to locate and remove the duplicate body picture from the parsed content.
+- **Exact Printing Color Styles**: Background colors and SVG path fills are stripped by default when printing to PDF. Ensure `print-color-adjust: exact` and `-webkit-print-color-adjust: exact` are enforced on `@media print` body and header elements.
+- **HTML Archive Downloads**: When generating HTML archive files, always sanitize the final string by removing the interactive control header (`.action-bar`) using DOMParser before completing the download.
 
 ## 🗂️ Related Project
 
