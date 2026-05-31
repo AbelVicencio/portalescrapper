@@ -36,7 +36,7 @@ Chrome/Edge extension (Manifest V3) with a **Side Panel** UI for passive news ar
     - Handles offline draft storage, listing, deletion, and export preparation.
 
 6.  **API Client (`src/api/`)**:
-    - `client.ts` — Handles HTTP operations for `POST /v1/medialogs/`, `GET /v1/portales/`, and `POST /v1/relaciones/medialogs`.
+    - `client.ts` — Handles HTTP operations for `POST /v1/medialogs/`, `PATCH /v1/medialogs/{id}` (for partial updates), `GET /v1/portales/`, and `POST /v1/relaciones/medialogs`.
     - `auth.ts` — Manages JWT authentication state (token storage and validation).
     - `types.ts` — Types for request and response payloads.
 
@@ -147,9 +147,11 @@ export const PORTAL_CLASSIFICATIONS: Record<number, number[]> = {
 - For SPA sites (like PressReader), use `[class*="pattern"]` wildcards since exact class names may change.
 - **Selector Priority (Crucial)**: `querySelectorText` evaluates comma-separated selectors sequentially from left to right. This ensures that more specific selectors (e.g., `.v-textview h1`) are evaluated and matched first, preventing loose fallbacks (e.g., naked `h1`) from matching random pagination elements (like "Prev") that appear earlier in the DOM. Always place more specific selectors first.
 
-### Saving a medialog + creating relations
-1. Call `grabarMedialog(...)`.
-2. If successful, the code automatically calls `crearRelacionMedialog` for each classification defined for that portal.
+### Saving a medialog + creating relations / updates
+1. For new articles, clicking "Grabar" calls `grabarMedialog(...)`.
+2. When a `dbRecordId` is resolved (through extraction, history loading, or duplicate checks), the "Grabar" button dynamically changes to "Actualizar".
+3. Clicking "Actualizar" performs a diff comparison between the current form state and `lastSavedFormState`, sending only the modified fields via `patchMedialog(...)` to `PATCH /v1/medialogs/{id}`.
+4. If successful, `crearRelacionMedialog` is run for each classification defined for that portal (only on initial record creation).
 
 ## ⚠️ Known Gotchas
 
@@ -164,7 +166,8 @@ export const PORTAL_CLASSIFICATIONS: Record<number, number[]> = {
 - **SPA relative assets (e.g. PressReader)**: Relative image references (`images/be-ft-logo.svg`) can resolve improperly or hit SPA shell pages returning HTML. During snapshotting, always access the fully qualified URL from the live element property `.src` and check response content-types (rejecting `text/html`) before attempting Base64 conversion.
 - **Duplicate Images in Body**: Portals often repeat the article's hero image inside the first paragraph of the body. Always use URL base matching to locate and remove the duplicate body picture from the parsed content.
 - **Exact Printing Color Styles**: Background colors and SVG path fills are stripped by default when printing to PDF. Ensure `print-color-adjust: exact` and `-webkit-print-color-adjust: exact` are enforced on `@media print` body and header elements.
-- **HTML Archive Downloads**: When generating HTML archive files, always sanitize the final string by removing the interactive control header (`.action-bar`) using DOMParser before completing the download.
+- **HTML Archive Downloads & Print Title**: When generating HTML archives or printing to PDF, the document `<title>` automatically prepends the clean main domain name in uppercase and a hyphen (e.g., `ELPAIS - Sheinbaum...`). The print layout elements have `.action-bar` stripped before saving.
+- **Unsaved Changes dialog**: The warning prompt asking about unsaved changes on Re-extraction has been completely disabled to ensure a faster and smoother capture workflow.
 
 ## 🗂️ Related Project
 

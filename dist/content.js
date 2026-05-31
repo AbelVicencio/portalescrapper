@@ -3158,10 +3158,22 @@
       return "";
     }
   }
-  async function getCleanSnapshotHTML() {
+  async function getCleanSnapshotHTML(overrideData) {
     const doc = document.cloneNode(true);
     const hostname = window.location.hostname;
     const originalUrl = window.location.href;
+    let domainName = hostname.replace(/^www\./, "");
+    const parts = domainName.split(".");
+    if (parts.length > 2) {
+      const secondLevelTlds = ["com", "org", "net", "edu", "gob", "mil", "co", "ac", "info"];
+      const secondToLast = parts[parts.length - 2];
+      if (secondLevelTlds.includes(secondToLast)) {
+        domainName = parts.slice(-3).join(".");
+      } else {
+        domainName = parts.slice(-2).join(".");
+      }
+    }
+    const mainDomainUpper = domainName.split(".")[0].toUpperCase();
     let siteConfig = null;
     for (const [key, config] of Object.entries(SITE_CONFIGS)) {
       if (hostname.includes(key)) {
@@ -3338,9 +3350,9 @@
     let pageDate = "";
     if (hostname.includes("eluniversal.com.mx")) {
       const category = doc.querySelector(".sc__author--category")?.textContent?.trim() || "";
-      const rawDate = doc.querySelector(".sc__author--date")?.textContent?.trim() || "";
-      if (category || rawDate) {
-        pageDate = `${category} ${rawDate}`.replace(/\s+/g, " ").trim();
+      const rawDate2 = doc.querySelector(".sc__author--date")?.textContent?.trim() || "";
+      if (category || rawDate2) {
+        pageDate = `${category} ${rawDate2}`.replace(/\s+/g, " ").trim();
       }
     }
     if (!pageDate && siteConfig?.selectors?.date) {
@@ -3485,18 +3497,30 @@
         console.warn("[PortalScrapper] Error removing duplicate hero image:", e);
       }
     }
-    const title = parsedArticle.title || doc.title || "Sin t\xEDtulo";
+    let title = parsedArticle.title || doc.title || "Sin t\xEDtulo";
     let authorVal = pageAuthor || parsedArticle.byline;
     if (authorVal && /^(naci[oó]n|nation)$/i.test(authorVal.trim())) {
       authorVal = "";
     }
-    const sourceName = parsedArticle.siteName || hostname.replace("www.", "");
-    const subtitleVal = parsedArticle.excerpt || pageSubtitle;
-    const kickerVal = pageKicker;
-    let formattedDate = pageDate;
-    if (pageDate) {
+    let sourceName = parsedArticle.siteName || hostname.replace("www.", "");
+    let subtitleVal = parsedArticle.excerpt || pageSubtitle;
+    let kickerVal = pageKicker;
+    let rawDate = pageDate;
+    if (overrideData) {
+      if (overrideData.superabstract) title = overrideData.superabstract;
+      if (overrideData.autor !== void 0) authorVal = overrideData.autor;
+      if (overrideData.medio !== void 0) sourceName = overrideData.medio;
+      if (overrideData.fecha !== void 0) rawDate = overrideData.fecha;
+      if (overrideData.texto !== void 0 && overrideData.texto.trim()) {
+        parsedArticle.content = overrideData.texto.split("\n\n").map((p) => `<p>${p.trim().replace(/\n/g, "<br>")}</p>`).join("\n");
+      }
+    }
+    const snapshotTitle = `${mainDomainUpper} - ${title}`;
+    const kickerValFinal = kickerVal;
+    let formattedDate = rawDate;
+    if (rawDate) {
       try {
-        const parsedDate = new Date(pageDate);
+        const parsedDate = new Date(rawDate);
         if (!isNaN(parsedDate.getTime())) {
           formattedDate = parsedDate.toLocaleDateString("es-MX", {
             year: "numeric",
@@ -3712,9 +3736,57 @@
         try {
           const clonedLogo = foundLogo.cloneNode(true);
           clonedLogo.removeAttribute("style");
+          try {
+            const copyComputedStyles = (srcNode, destNode) => {
+              const computed = window.getComputedStyle(srcNode);
+              const fillVal = computed.fill;
+              const strokeVal = computed.stroke;
+              if (fillVal && fillVal !== "none" && fillVal !== "rgba(0, 0, 0, 0)") {
+                destNode.setAttribute("fill", fillVal);
+              }
+              if (strokeVal && strokeVal !== "none" && strokeVal !== "rgba(0, 0, 0, 0)") {
+                destNode.setAttribute("stroke", strokeVal);
+              }
+              const srcChildren = Array.from(srcNode.children);
+              const destChildren = Array.from(destNode.children);
+              for (let i = 0; i < srcChildren.length && i < destChildren.length; i++) {
+                copyComputedStyles(srcChildren[i], destChildren[i]);
+              }
+            };
+            copyComputedStyles(foundLogo, clonedLogo);
+          } catch (styleCopyErr) {
+            console.warn("Error inlining computed logo styles:", styleCopyErr);
+          }
           if (clonedLogo.tagName.toLowerCase() === "svg") {
+            const origWidthAttr = foundLogo.getAttribute("width");
+            const origHeightAttr = foundLogo.getAttribute("height");
+            const viewBox = foundLogo.getAttribute("viewBox");
             clonedLogo.setAttribute("height", "32");
-            clonedLogo.removeAttribute("width");
+            let aspectCalculated = false;
+            if (origWidthAttr && origHeightAttr) {
+              const w = parseFloat(origWidthAttr);
+              const h = parseFloat(origHeightAttr);
+              if (!isNaN(w) && !isNaN(h) && h > 0) {
+                const scaledWidth = Math.round(w / h * 32);
+                clonedLogo.setAttribute("width", scaledWidth.toString());
+                aspectCalculated = true;
+              }
+            }
+            if (!aspectCalculated && viewBox) {
+              const vbParts = viewBox.split(/[ ,]+/).map(parseFloat);
+              if (vbParts.length === 4) {
+                const vbW = vbParts[2];
+                const vbH = vbParts[3];
+                if (vbH > 0) {
+                  const scaledWidth = Math.round(vbW / vbH * 32);
+                  clonedLogo.setAttribute("width", scaledWidth.toString());
+                  aspectCalculated = true;
+                }
+              }
+            }
+            if (!aspectCalculated) {
+              clonedLogo.removeAttribute("width");
+            }
             clonedLogo.classList.add("extracted-svg-logo");
             if (isDarkTheme) {
               clonedLogo.setAttribute("fill", "#ffffff");
@@ -3858,12 +3930,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title}</title>
+  <title>${snapshotTitle}</title>
   <base href="${originalUrl}">
 
   <!-- SEO & Dynamic Previews (WhatsApp, Telegram, Facebook, Twitter, Slack, Discord) -->
   <meta name="description" content="${cleanSubtitle}">
-  <meta property="og:title" content="${title}">
+  <meta property="og:title" content="${snapshotTitle}">
   <meta property="og:description" content="${cleanSubtitle}">
   ${heroImageSrc ? `<meta property="og:image" content="${heroImageSrc}">` : ""}
   <meta property="og:url" content="${originalUrl}">
@@ -3871,7 +3943,7 @@
   <meta property="og:site_name" content="${sourceName}">
   
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="${title}">
+  <meta name="twitter:title" content="${snapshotTitle}">
   <meta name="twitter:description" content="${cleanSubtitle}">
   ${heroImageSrc ? `<meta name="twitter:image" content="${heroImageSrc}">` : ""}
 
@@ -3919,7 +3991,9 @@
 
     body {
       font-family: ${resolvedBodyFont};
+      color: #1e293b;
       color: var(--text-color);
+      background-color: ${resolvedBgColor};
       background-color: var(--bg-color);
       line-height: 1.65;
       margin: 0;
@@ -4332,6 +4406,12 @@
       text-decoration: underline;
     }
 
+    /* Avoid breaking paragraphs, blockquotes, headers and images across PDF pages */
+    p, blockquote, img, .hero-container, .portal-top-bar, .article-header, .original-url-footer {
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
     /* Print Specific Stylesheet */
     @media print {
       body {
@@ -4380,43 +4460,45 @@
     </div>
   </div>
 
-  <div class="portal-top-bar">
-    ${logoHtml}
-  </div>
+  <div id="pdf-capture-wrapper" style="width: 800px; margin: 0 auto; padding: 0; background: #ffffff; box-sizing: border-box; overflow: hidden; position: relative;">
+    <div class="portal-top-bar">
+      ${logoHtml}
+    </div>
 
-  <div class="container">
-    <div class="portal-masthead">
-      ${sectionName ? `
-      <div class="portal-section-bar">
-        <h2 class="portal-section-title">${sectionName}</h2>
-        <div class="portal-nav">${navLinksText}</div>
+    <div class="container">
+      <div class="portal-masthead">
+        ${sectionName ? `
+        <div class="portal-section-bar">
+          <h2 class="portal-section-title">${sectionName}</h2>
+          <div class="portal-nav">${navLinksText}</div>
+        </div>
+        ` : ""}
+        ${kickerHtml}
       </div>
-      ` : ""}
-      ${kickerHtml}
-    </div>
 
-    <div class="article-header">
-      <h1 class="article-title">${title}</h1>
-      ${subtitleHtml}
-      ${metaBlockHtml}
-    </div>
+      <div class="article-header">
+        <h1 class="article-title">${title}</h1>
+        ${subtitleHtml}
+        ${metaBlockHtml}
+      </div>
 
-    ${heroImageHtml}
+      ${heroImageHtml}
 
-    <div class="article-body">
-      ${parsedArticle.content}
-    </div>
+      <div class="article-body">
+        ${parsedArticle.content}
+      </div>
 
-    <div class="original-url-footer">
-      Documento generado por PortalScrapper.<br>
-      Nota original: <a href="${originalUrl}" target="_blank">${originalUrl}</a>
+      <div class="original-url-footer">
+        Documento generado por PortalScrapper.<br>
+        Nota original: <a href="${originalUrl}" target="_blank">${originalUrl}</a>
+      </div>
     </div>
   </div>
 </body>
 </html>`;
     return {
       html: finalHtml,
-      title,
+      title: snapshotTitle,
       originalUrl
     };
   }
@@ -4584,7 +4666,7 @@
         }
         handleExtractionRequest("explicit", msg.type === "EXTRACT_NOW");
       } else if (msg.type === "GET_CLEAN_SNAPSHOT") {
-        getCleanSnapshotHTML().then((result) => {
+        getCleanSnapshotHTML(msg.payload).then((result) => {
           sendResponse(result);
         }).catch((err) => {
           console.error("[PortalScrapper] Error generating clean snapshot:", err);

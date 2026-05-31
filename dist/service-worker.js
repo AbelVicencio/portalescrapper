@@ -95,7 +95,10 @@
             if (!tab?.id) {
               throw new Error("No active tab found");
             }
-            const response = await chrome.tabs.sendMessage(tab.id, { type: "GET_CLEAN_SNAPSHOT" });
+            const response = await chrome.tabs.sendMessage(tab.id, {
+              type: "GET_CLEAN_SNAPSHOT",
+              payload: msg.payload
+            });
             sendResponse({ ok: true, payload: response });
             break;
           }

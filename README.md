@@ -41,7 +41,7 @@ graph TD
    Interfaz de usuario persistente y fluida que se aloja al costado de la pantalla. Cuenta con un flujo de inicio de sesión con JWT, un formulario de revisión exhaustivo, visualización de clasificaciones automáticas y panel de historial de drafts guardados localmente.
 
 4. **API Client (`src/api/`)**:
-   - `client.ts`: Expone las llamadas REST a la API de Medialog (`/v1/medialogs/`, `/v1/portales/`, `/v1/relaciones/medialogs/`, `/v1/emisiones/`).
+   - `client.ts`: Expone las llamadas REST a la API de Medialog (`/v1/medialogs/` con soporte para POST y PATCH, `/v1/portales/`, `/v1/relaciones/medialogs/`, `/v1/emisiones/`).
    - `auth.ts`: Maneja el ciclo de vida del token JWT en `chrome.storage.local`, incluyendo auto-expiración.
    - `types.ts`: Define de forma estricta los payloads de envío y recepción.
 
@@ -86,6 +86,13 @@ Si se encuentra un registro idéntico, la extensión **detiene el guardado**, as
 ### 5. Clasificaciones Automáticas (Relaciones)
 Configurable directamente en [src/config/portalClassifications.ts](file:///c:/Users/abelv/OneDrive/Code/portalescrapper/src/config/portalClassifications.ts). Tras un guardado exitoso en el backend de Medialog, la extensión realiza peticiones en ráfaga a `POST /v1/relaciones/medialogs` para vincular clasificaciones temáticas automáticamente en base al ID del portal resuelto (ej. *El País* mapea automáticamente la clasificación `25609`).
 
+### 6. Sincronización y Actualización Dinámica (PATCH)
+Si el formulario contiene un identificador de Medialog válido y cargado (ya sea resuelto mediante la detección de duplicados remotos o cargado desde el historial de drafts sincronizados), el botón **"Grabar"** cambiará su nombre y comportamiento automáticamente a **"Actualizar"**:
+* **Comparación Diferencial**: Al presionar "Actualizar", la extensión compara en tiempo real los valores actuales del formulario con `lastSavedFormState` y recopila únicamente los campos que han sufrido modificaciones.
+* **Petición Parcial (PATCH)**: Se envía una solicitud `PATCH /v1/medialogs/{id}` que transmite única y exclusivamente el payload con los campos modificados.
+* **Aviso y Clipboard**: Tras una actualización exitosa, se emite el Toast `"Medialog #{id} Actualizado"` y se copia de manera automática el número de Medialog al portapapeles. Si no hay cambios, notifica al usuario de forma clara sin realizar peticiones redundantes.
+* **Flujo Ágil**: Se desactiva la advertencia de cambios sin guardar en el panel durante re-extracciones consecutivas para no interrumpir el flujo del usuario.
+
 ### 6. 📸 Generador de Snapshots Premium (HTML/PDF)
 La extensión cuenta con un motor avanzado de previsualización e impresión (`src/extractors/snapshot.ts`) que genera documentos autocontenidos listos para archivar o imprimir a PDF con un diseño editorial de alta gama:
 * **Resolución Genérica Multicapa de Logotipos:** Busca y extrae de forma inteligente el logotipo de la marca del portal de origen sin depender de configuraciones estáticas. Evalúa clases de cabeceras, enlaces de inicio (`href="/"`) y metadatos semánticos en las imágenes o SVGs del DOM (soportando portales SPA complejos como PressReader y Reuters).
@@ -94,6 +101,7 @@ La extensión cuenta con un motor avanzado de previsualización e impresión (`s
 * **Filtros Genéricos de Promociones y CTA:** Elimina de manera proactiva anuncios, banners de suscripción, paywalls, boletines informativos y elementos marcados con `.hide-for-print` (probado en Washington Post y El Universal).
 * **Metadatos e Integridad para Mensajería:** Incluye etiquetas OpenGraph (`og:*`), Twitter Cards y Schema.org JSON-LD estructurado en la cabecera. Añade además `<meta name="theme-color">` dinámico que colorea la barra lateral de vista previa al compartirse en WhatsApp, Telegram, Slack o Discord.
 * **Descargas de Archivo Histórico Limpias:** Al presionar **Guardar HTML**, la extensión limpia el código al vuelo con `DOMParser` para eliminar la barra interactiva de control (`❌ Cerrar`, `💾 Guardar HTML`, `🖨️ Imprimir`) entregando un documento final pulido y enfocado exclusivamente en la nota periodística.
+* **Prefijo del Dominio Principal en Títulos (HTML/PDF):** El motor de snapshots identifica el dominio principal y le añade un formato en mayúsculas seguido de un guion al título general (ej. `ELPAIS - Sheinbaum...`). Esto hace que el título de la pestaña de impresión y el nombre por defecto de descarga del archivo HTML o PDF incluyan automáticamente esta estructura.
 
 ---
 

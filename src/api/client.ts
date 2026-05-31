@@ -137,6 +137,29 @@ export async function grabarMedialog(token: string, payload: import('./types').G
   return json.data?.medialog || json.medialog || json.data?.id || 0;
 }
 
+export async function patchMedialog(
+  token: string,
+  medialogId: number,
+  payload: Partial<GrabarMedialogPayload>
+): Promise<boolean> {
+  const res = await fetchWithTimeout(`${BASE_URL}/medialogs/${medialogId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    if (res.status === 401 || res.status === 403) {
+      throw new APIMedialogError(401, 'Token expirado o inválido');
+    }
+    throw new APIMedialogError(res.status, body);
+  }
+  return true;
+}
+
 export async function healthCheck(): Promise<boolean> {
   try {
     const res = await fetchWithTimeout(`${BASE_URL}/health`, { method: 'GET' });

@@ -270,6 +270,24 @@
     const json = await res.json();
     return json.data?.medialog || json.medialog || json.data?.id || 0;
   }
+  async function patchMedialog(token, medialogId, payload) {
+    const res = await fetchWithTimeout(`${BASE_URL}/medialogs/${medialogId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      if (res.status === 401 || res.status === 403) {
+        throw new APIMedialogError(401, "Token expirado o inv\xE1lido");
+      }
+      throw new APIMedialogError(res.status, body);
+    }
+    return true;
+  }
   function toYMD(raw) {
     if (!raw) return "";
     const cleaned = raw.replace(/\|.*/g, "").trim();
@@ -544,6 +562,7 @@
   var currentUser = null;
   var currentToken = null;
   var editingDirty = false;
+  var lastSavedFormState = {};
   var hasRegisteredTabListeners = false;
   function setupTabChangeListeners() {
     if (hasRegisteredTabListeners) return;
@@ -827,6 +846,19 @@
       btnEditar.disabled = !dbIdVal || isNaN(numericId) || numericId <= 0;
     }
   }
+  function updateGrabarButtonState() {
+    const dbIdInput = el("dbRecordId");
+    const dbIdVal = dbIdInput?.value || "";
+    const numericId = parseInt(dbIdVal, 10);
+    const btnGrabar = el("btn-grabar");
+    if (btnGrabar) {
+      if (dbIdVal && !isNaN(numericId) && numericId > 0) {
+        btnGrabar.textContent = "\u{1F4BE} Actualizar";
+      } else {
+        btnGrabar.textContent = "\u{1F4BE} Grabar";
+      }
+    }
+  }
   function populateUI(article) {
     const setVal = (id, val) => {
       const input = el(id);
@@ -845,6 +877,12 @@
     renderClasificaciones(article.clasificaciones || []);
     updatePortalHeader();
     updateEditarButtonState();
+    updateGrabarButtonState();
+    if (article.dbRecordId && article.dbRecordId > 0) {
+      lastSavedFormState = readFormIntoArticle();
+    } else {
+      lastSavedFormState = {};
+    }
   }
   function readFormIntoArticle() {
     const id = currentArticle.id || crypto.randomUUID();
@@ -1062,7 +1100,9 @@
       if (dbIdInput) {
         dbIdInput.value = String(duplicadoId);
         updateEditarButtonState();
+        updateGrabarButtonState();
       }
+      lastSavedFormState = readFormIntoArticle();
       renderHistory();
       updateBadge();
       return;
@@ -1101,21 +1141,81 @@
       await new Promise((res) => setTimeout(res, 400 + i * 700));
     }
   }
+  async function handleActualizarAPI(dbRecordId) {
+    if (!await ensureValidSession()) {
+      return;
+    }
+    const current = readFormIntoArticle();
+    if (!lastSavedFormState || lastSavedFormState.dbRecordId !== dbRecordId) {
+      lastSavedFormState = {};
+    }
+    const patchPayload = {};
+    if (current.superabstract !== lastSavedFormState.superabstract) {
+      patchPayload.superabstract = current.superabstract.slice(0, 200);
+    }
+    if (current.url !== lastSavedFormState.url) {
+      patchPayload.abstract = current.url;
+    }
+    if (current.emisora !== lastSavedFormState.emisora) {
+      patchPayload.emisora = current.emisora;
+    }
+    if (current.portal !== lastSavedFormState.portal) {
+      patchPayload.pendiente = current.portal ?? current.pendiente;
+    }
+    if (current.emision !== lastSavedFormState.emision) {
+      patchPayload.emision = current.emision;
+    }
+    if (current.fecha_transcripcion !== lastSavedFormState.fecha_transcripcion) {
+      patchPayload.fecha_transcripcion = current.fecha_transcripcion;
+    }
+    if (current.texto !== lastSavedFormState.texto) {
+      patchPayload.transcripcion = current.texto;
+    }
+    const changedKeys = Object.keys(patchPayload);
+    if (changedKeys.length === 0) {
+      try {
+        await navigator.clipboard.writeText(String(dbRecordId));
+        showToast(`Medialog #${dbRecordId} sin cambios detectados. ID copiado al Clipboard.`, 3e3);
+      } catch (e) {
+        showToast(`Medialog #${dbRecordId} sin cambios detectados.`, 3e3);
+      }
+      return;
+    }
+    console.log(`[PortalScrapper][DEBUG] Payload para PATCH /v1/medialogs/${dbRecordId}`, patchPayload);
+    try {
+      const success = await patchMedialog(currentToken, dbRecordId, patchPayload);
+      if (success) {
+        current.dbRecordId = dbRecordId;
+        current.status = "synced";
+        await saveArticle(current);
+        try {
+          await navigator.clipboard.writeText(String(dbRecordId));
+          showToast(`Medialog #${dbRecordId} Actualizado`, 3e3, "large green");
+        } catch (e) {
+          showToast(`Medialog #${dbRecordId} Actualizado (no se pudo copiar al Clipboard)`, 3e3, "large green");
+        }
+        currentArticle = current;
+        populateUI(current);
+        renderHistory();
+        updateBadge();
+      }
+    } catch (err) {
+      const handled = await checkAndHandleAuthError(err);
+      if (!handled) {
+        showToast("Error al actualizar: " + (err.message || err));
+      }
+    }
+  }
   async function handleGrabarAPI() {
     if (!await ensureValidSession()) {
       return;
     }
-    const article = readFormIntoArticle();
     const existingDbId = parseInt(el("dbRecordId")?.value || "0", 10);
     if (existingDbId > 0) {
-      try {
-        await navigator.clipboard.writeText(String(existingDbId));
-        showToast(`\u26A0\uFE0F Nota EXISTENTE (ya en Medialog #${existingDbId}). ID copiado al Clipboard.`, 3e3, "large green");
-      } catch (e) {
-        showToast(`\u26A0\uFE0F Nota EXISTENTE (ya en Medialog #${existingDbId}).`, 3e3, "large green");
-      }
+      await handleActualizarAPI(existingDbId);
       return;
     }
+    const article = readFormIntoArticle();
     const currentUrl = el("url")?.value?.trim() || "";
     const normalizedUrl = currentUrl.split("#")[0].split("?")[0];
     const currentFormDbId = parseInt(el("dbRecordId")?.value || "0", 10);
@@ -1234,13 +1334,24 @@
     }
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab?.id) {
-        showToast("No hay pesta\xF1a activa para generar snapshot");
+      if (!tab?.id || !tab.url || tab.url.startsWith("chrome://") || tab.url.startsWith("edge://") || tab.url.startsWith("about:") || tab.url.startsWith("chrome-extension://")) {
+        showToast("\u26A0\uFE0F Navega a un portal de noticias v\xE1lido antes de generar el PDF", 4e3);
         return;
       }
+      const editedFields = {
+        superabstract: el("superabstract")?.value || "",
+        texto: el("texto")?.value || "",
+        autor: el("autor")?.value || "",
+        fecha: el("fecha_transcripcion")?.value || "",
+        medio: el("medio")?.value || "",
+        medialogId: el("dbRecordId")?.value || ""
+      };
       const response = await new Promise((resolve, reject) => {
         chrome.runtime.sendMessage(
-          { type: "GET_CLEAN_SNAPSHOT" },
+          {
+            type: "GET_CLEAN_SNAPSHOT",
+            payload: editedFields
+          },
           (res) => {
             if (chrome.runtime.lastError) {
               reject(new Error(chrome.runtime.lastError.message));
@@ -1272,7 +1383,21 @@
         });
       }
       if (printBtn) {
-        printBtn.addEventListener("click", () => {
+        printBtn.addEventListener("click", async () => {
+          try {
+            const dbIdInput = el("dbRecordId");
+            const dbIdVal = dbIdInput?.value || "";
+            const medialogId = parseInt(dbIdVal, 10);
+            if (medialogId && !isNaN(medialogId)) {
+              const result = await chrome.storage.local.get("pdfDefaultFolder");
+              const defaultFolder = result.pdfDefaultFolder || "\\\\10.0.5.225\\rec24h\\mediarchivos\\medialogs";
+              const fullNetworkPath = `${defaultFolder}\\${medialogId}.pdf`;
+              await printWindow.navigator.clipboard.writeText(fullNetworkPath);
+              showToast("\u{1F4CB} Ruta de red y nombre copiados al clipboard", 2500, "large green");
+            }
+          } catch (clipErr) {
+            console.warn("Error copying print path to clipboard:", clipErr);
+          }
           printWindow.print();
         });
       }
@@ -1305,6 +1430,16 @@
           }, 100);
         });
       }
+      try {
+        const dbIdInput = el("dbRecordId");
+        const dbIdVal = dbIdInput?.value || "";
+        const medialogId = parseInt(dbIdVal, 10);
+        if (medialogId && !isNaN(medialogId)) {
+          printWindow.document.title = `${medialogId}`;
+        }
+      } catch (titleErr) {
+        console.warn("Error setting document title:", titleErr);
+      }
       showToast("Snapshot generado con \xE9xito");
     } catch (err) {
       console.error("[PortalScrapper] PDF generation error:", err);
@@ -1318,9 +1453,6 @@
   }
   async function handleReExtract() {
     if (!await ensureValidSession()) return;
-    if (editingDirty) {
-      if (!confirm("Tienes cambios sin guardar. \xBFExtraer y sobrescribir?")) return;
-    }
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab?.id) {
@@ -1641,7 +1773,10 @@
     const dbRecordIdInput = el("dbRecordId");
     if (dbRecordIdInput) {
       ["input", "change"].forEach((ev) => {
-        dbRecordIdInput.addEventListener(ev, updateEditarButtonState);
+        dbRecordIdInput.addEventListener(ev, () => {
+          updateEditarButtonState();
+          updateGrabarButtonState();
+        });
       });
     }
     ["btn-reextract", "btn-grabar", "btn-checar", "btn-editar", "btn-generate-link", "btn-pdf"].forEach((id) => {
@@ -1649,6 +1784,7 @@
       if (btn) btn.addEventListener("click", playTicSound);
     });
     updateEditarButtonState();
+    updateGrabarButtonState();
     await renderHistory();
   }
   async function init() {

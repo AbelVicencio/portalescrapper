@@ -3,7 +3,7 @@ import * as storage from '../storage/store';
 import * as clipboard from '../utils/clipboard';
 import * as exportUtils from '../utils/export';
 import { login, logout, getCurrentUser } from '../api/auth';
-import { resolvePortalByDomain, resolveEmisionPorEmisoraYFecha, grabarMedialog, buscarMedialogDuplicado, crearRelacionMedialog, getMedialogHash, type GrabarMedialogPayload } from '../api/client';
+import { resolvePortalByDomain, resolveEmisionPorEmisoraYFecha, grabarMedialog, patchMedialog, buscarMedialogDuplicado, crearRelacionMedialog, getMedialogHash, type GrabarMedialogPayload } from '../api/client';
 import { PORTAL_CLASSIFICATIONS } from '../config/portalClassifications';
 
 // ============================================================================
@@ -26,6 +26,7 @@ let currentArticle: Partial<NewsArticle> = {};
 let currentUser: string | null = null;
 let currentToken: string | null = null;
 let editingDirty = false;
+let lastSavedFormState: Partial<NewsArticle> = {};
 let hasRegisteredTabListeners = false;
 
 function setupTabChangeListeners() {
@@ -381,6 +382,20 @@ function updateEditarButtonState() {
   }
 }
 
+function updateGrabarButtonState() {
+  const dbIdInput = el('dbRecordId') as HTMLInputElement | null;
+  const dbIdVal = dbIdInput?.value || '';
+  const numericId = parseInt(dbIdVal, 10);
+  const btnGrabar = el('btn-grabar') as HTMLButtonElement | null;
+  if (btnGrabar) {
+    if (dbIdVal && !isNaN(numericId) && numericId > 0) {
+      btnGrabar.textContent = '💾 Actualizar';
+    } else {
+      btnGrabar.textContent = '💾 Grabar';
+    }
+  }
+}
+
 function populateUI(article: Partial<NewsArticle>) {
   const setVal = (id: string, val: string) => {
     const input = el(id) as HTMLInputElement | HTMLTextAreaElement | null;
@@ -400,6 +415,13 @@ function populateUI(article: Partial<NewsArticle>) {
   renderClasificaciones(article.clasificaciones || []);
   updatePortalHeader();
   updateEditarButtonState();
+  updateGrabarButtonState();
+
+  if (article.dbRecordId && article.dbRecordId > 0) {
+    lastSavedFormState = readFormIntoArticle();
+  } else {
+    lastSavedFormState = {};
+  }
 }
 
 function readFormIntoArticle(): NewsArticle {
@@ -655,7 +677,10 @@ async function checkDuplicateNow(force = false) {
     if (dbIdInput) {
       dbIdInput.value = String(duplicadoId);
       updateEditarButtonState();
+      updateGrabarButtonState();
     }
+    
+    lastSavedFormState = readFormIntoArticle();
     
     renderHistory();
     storage.updateBadge();
@@ -699,28 +724,95 @@ async function requestExtractionWithRetries(attempts: number = 4) {
   }
 }
 
+async function handleActualizarAPI(dbRecordId: number) {
+  if (!(await ensureValidSession())) {
+    return;
+  }
+
+  const current = readFormIntoArticle();
+
+  // Si lastSavedFormState no tiene el mismo dbRecordId, vaciarlo para enviar todos los campos
+  if (!lastSavedFormState || lastSavedFormState.dbRecordId !== dbRecordId) {
+    lastSavedFormState = {};
+  }
+
+  const patchPayload: Record<string, any> = {};
+
+  if (current.superabstract !== lastSavedFormState.superabstract) {
+    patchPayload.superabstract = current.superabstract.slice(0, 200);
+  }
+  if (current.url !== lastSavedFormState.url) {
+    patchPayload.abstract = current.url;
+  }
+  if (current.emisora !== lastSavedFormState.emisora) {
+    patchPayload.emisora = current.emisora;
+  }
+  if (current.portal !== lastSavedFormState.portal) {
+    patchPayload.pendiente = current.portal ?? current.pendiente;
+  }
+  if (current.emision !== lastSavedFormState.emision) {
+    patchPayload.emision = current.emision;
+  }
+  if (current.fecha_transcripcion !== lastSavedFormState.fecha_transcripcion) {
+    patchPayload.fecha_transcripcion = current.fecha_transcripcion;
+  }
+  if (current.texto !== lastSavedFormState.texto) {
+    patchPayload.transcripcion = current.texto;
+  }
+
+  const changedKeys = Object.keys(patchPayload);
+  if (changedKeys.length === 0) {
+    try {
+      await navigator.clipboard.writeText(String(dbRecordId));
+      showToast(`Medialog #${dbRecordId} sin cambios detectados. ID copiado al Clipboard.`, 3000);
+    } catch (e) {
+      showToast(`Medialog #${dbRecordId} sin cambios detectados.`, 3000);
+    }
+    return;
+  }
+
+  console.log(`[PortalScrapper][DEBUG] Payload para PATCH /v1/medialogs/${dbRecordId}`, patchPayload);
+
+  try {
+    const success = await patchMedialog(currentToken!, dbRecordId, patchPayload);
+    if (success) {
+      current.dbRecordId = dbRecordId;
+      current.status = 'synced';
+      await storage.saveArticle(current);
+
+      try {
+        await navigator.clipboard.writeText(String(dbRecordId));
+        showToast(`Medialog #${dbRecordId} Actualizado`, 3000, 'large green');
+      } catch (e) {
+        showToast(`Medialog #${dbRecordId} Actualizado (no se pudo copiar al Clipboard)`, 3000, 'large green');
+      }
+
+      currentArticle = current;
+      populateUI(current);
+      renderHistory();
+      storage.updateBadge();
+    }
+  } catch (err: any) {
+    const handled = await checkAndHandleAuthError(err);
+    if (!handled) {
+      showToast('Error al actualizar: ' + (err.message || err));
+    }
+  }
+}
+
 async function handleGrabarAPI() {
   // Session guard first – prevents using expired token and freezes
   if (!(await ensureValidSession())) {
     return;
   }
 
-  const article = readFormIntoArticle();
-
-  // ========================================================
-  // GUARDIA INMEDIATA: si el formulario ya tiene Medialog ID → no grabar de nuevo
-  // Esto resuelve el caso de dar muchos clicks seguidos al botón
-  // ========================================================
   const existingDbId = parseInt((el('dbRecordId') as HTMLInputElement | null)?.value || '0', 10);
   if (existingDbId > 0) {
-    try {
-      await navigator.clipboard.writeText(String(existingDbId));
-      showToast(`⚠️ Nota EXISTENTE (ya en Medialog #${existingDbId}). ID copiado al Clipboard.`, 3000, 'large green');
-    } catch (e) {
-      showToast(`⚠️ Nota EXISTENTE (ya en Medialog #${existingDbId}).`, 3000, 'large green');
-    }
+    await handleActualizarAPI(existingDbId);
     return;
   }
+
+  const article = readFormIntoArticle();
 
   // ========================================================
   // CHEQUEO LOCAL (solo para extracciones frescas)
@@ -887,14 +979,26 @@ async function handleGeneratePDF() {
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) {
-      showToast('No hay pestaña activa para generar snapshot');
+    if (!tab?.id || !tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('edge://') || tab.url.startsWith('about:') || tab.url.startsWith('chrome-extension://')) {
+      showToast('⚠️ Navega a un portal de noticias válido antes de generar el PDF', 4000);
       return;
     }
 
+    const editedFields = {
+      superabstract: (el('superabstract') as HTMLTextAreaElement)?.value || '',
+      texto: (el('texto') as HTMLTextAreaElement)?.value || '',
+      autor: (el('autor') as HTMLInputElement)?.value || '',
+      fecha: (el('fecha_transcripcion') as HTMLInputElement)?.value || '',
+      medio: (el('medio') as HTMLInputElement)?.value || '',
+      medialogId: (el('dbRecordId') as HTMLInputElement)?.value || ''
+    };
+
     const response = await new Promise<any>((resolve, reject) => {
       chrome.runtime.sendMessage(
-        { type: 'GET_CLEAN_SNAPSHOT' },
+        { 
+          type: 'GET_CLEAN_SNAPSHOT',
+          payload: editedFields
+        },
         (res) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
@@ -933,7 +1037,24 @@ async function handleGeneratePDF() {
     }
 
     if (printBtn) {
-      printBtn.addEventListener('click', () => {
+      printBtn.addEventListener('click', async () => {
+        // Copy the complete destination network UNC path with filename to clipboard automatically!
+        try {
+          const dbIdInput = el('dbRecordId') as HTMLInputElement | null;
+          const dbIdVal = dbIdInput?.value || '';
+          const medialogId = parseInt(dbIdVal, 10);
+          if (medialogId && !isNaN(medialogId)) {
+            const result = await chrome.storage.local.get('pdfDefaultFolder');
+            const defaultFolder = result.pdfDefaultFolder || '\\\\10.0.5.225\\rec24h\\mediarchivos\\medialogs';
+            const fullNetworkPath = `${defaultFolder}\\${medialogId}.pdf`;
+            await printWindow.navigator.clipboard.writeText(fullNetworkPath);
+            showToast('📋 Ruta de red y nombre copiados al clipboard', 2500, 'large green');
+          }
+        } catch (clipErr) {
+          console.warn('Error copying print path to clipboard:', clipErr);
+        }
+
+        // Trigger native browser printing
         printWindow.print();
       });
     }
@@ -971,6 +1092,18 @@ async function handleGeneratePDF() {
         }, 100);
       });
     }
+    // Dynamically set document title to the medialogId if present
+    // This automatically names the file as {medialogId}.pdf when using standard browser print-to-PDF!
+    try {
+      const dbIdInput = el('dbRecordId') as HTMLInputElement | null;
+      const dbIdVal = dbIdInput?.value || '';
+      const medialogId = parseInt(dbIdVal, 10);
+      if (medialogId && !isNaN(medialogId)) {
+        printWindow.document.title = `${medialogId}`;
+      }
+    } catch (titleErr) {
+      console.warn('Error setting document title:', titleErr);
+    }
 
     showToast('Snapshot generado con éxito');
   } catch (err: any) {
@@ -986,9 +1119,6 @@ async function handleGeneratePDF() {
 
 async function handleReExtract() {
   if (!(await ensureValidSession())) return;
-  if (editingDirty) {
-    if (!confirm('Tienes cambios sin guardar. ¿Extraer y sobrescribir?')) return;
-  }
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) {
@@ -1361,11 +1491,14 @@ async function initMainUI() {
   });
   wire('btn-pdf', handleGeneratePDF);
 
-  // Listeners para actualizar el estado del botón Editar en tiempo real si el usuario lo escribe manualmente
+  // Listeners para actualizar el estado del botón Editar y Grabar/Actualizar en tiempo real si el usuario lo escribe manualmente
   const dbRecordIdInput = el('dbRecordId') as HTMLInputElement | null;
   if (dbRecordIdInput) {
     ['input', 'change'].forEach((ev) => {
-      dbRecordIdInput.addEventListener(ev, updateEditarButtonState);
+      dbRecordIdInput.addEventListener(ev, () => {
+        updateEditarButtonState();
+        updateGrabarButtonState();
+      });
     });
   }
 
@@ -1375,8 +1508,9 @@ async function initMainUI() {
     if (btn) btn.addEventListener('click', playTicSound);
   });
 
-  // Inicializar estado del botón Editar
+  // Inicializar estado del botón Editar y Grabar/Actualizar
   updateEditarButtonState();
+  updateGrabarButtonState();
 
   // Resolution is triggered ONLY from ARTICLE_EXTRACTED listener (the reliable single path).
   // We deliberately removed the direct call that was causing the double-resolve right after reload.

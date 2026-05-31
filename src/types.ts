@@ -88,4 +88,4 @@ export type ExtensionMessage =
   | { type: 'NO_ARTICLE_FOUND' }
   | { type: 'UPDATE_BADGE'; payload: { count: number } }
   | { type: 'EXTRACT_NOW' }
-  | { type: 'GET_CLEAN_SNAPSHOT' }; // internal signal to generate print-friendly snapshot HTML
+  | { type: 'GET_CLEAN_SNAPSHOT'; payload?: any }; // internal signal to generate print-friendly snapshot HTML

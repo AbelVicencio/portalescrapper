@@ -110,6 +110,12 @@ export const BASE64_LOGOS: Record<string, string> = ${JSON.stringify(logoMap, nu
 
 async function build() {
   generateBase64Logos();
+  try {
+    fs.mkdirSync("./dist", { recursive: true });
+    fs.copyFileSync("./src/assets/html2pdf.bundle.min.js", "./dist/html2pdf.bundle.min.js");
+  } catch (copyErr) {
+    console.error("Failed to copy html2pdf to dist:", copyErr);
+  }
   if (isWatch) {
     const contexts = await Promise.all(
       entryPoints.map((opts) => esbuild.context(opts))

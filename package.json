@@ -1,6 +1,6 @@
 {
   "name": "portalescrapper",
-  "version": "1.0.179",
+  "version": "1.0.207",
   "description": "Chrome/Edge MV3 Side Panel extension for passive news article capture from major portals with direct API Medialog persistence.",
   "type": "module",
   "scripts": {

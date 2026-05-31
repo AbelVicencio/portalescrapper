@@ -24,11 +24,32 @@ async function toBase64DataUri(url: string): Promise<string> {
  * Uses a Hybrid Approach: Clones DOM, performs aggressive custom/generic cleaning,
  * runs Readability.js with soft config, and renders a premium print layout.
  */
-export async function getCleanSnapshotHTML(): Promise<{ html: string; title: string; originalUrl: string }> {
+export async function getCleanSnapshotHTML(overrideData?: {
+  superabstract?: string;
+  texto?: string;
+  autor?: string;
+  fecha?: string;
+  medio?: string;
+  medialogId?: string;
+}): Promise<{ html: string; title: string; originalUrl: string }> {
   // 1. Clone the current document to avoid mutating the live page
   const doc = document.cloneNode(true) as Document;
   const hostname = window.location.hostname;
   const originalUrl = window.location.href;
+
+  // Extract main domain in uppercase
+  let domainName = hostname.replace(/^www\./, '');
+  const parts = domainName.split('.');
+  if (parts.length > 2) {
+    const secondLevelTlds = ['com', 'org', 'net', 'edu', 'gob', 'mil', 'co', 'ac', 'info'];
+    const secondToLast = parts[parts.length - 2];
+    if (secondLevelTlds.includes(secondToLast)) {
+      domainName = parts.slice(-3).join('.');
+    } else {
+      domainName = parts.slice(-2).join('.');
+    }
+  }
+  const mainDomainUpper = domainName.split('.')[0].toUpperCase();
 
   // Find matching site config
   let siteConfig: any = null;
@@ -402,20 +423,38 @@ export async function getCleanSnapshotHTML(): Promise<{ html: string; title: str
     }
   }
 
-  const title = parsedArticle.title || doc.title || 'Sin título';
+  let title = parsedArticle.title || doc.title || 'Sin título';
   let authorVal = pageAuthor || parsedArticle.byline;
   if (authorVal && /^(naci[oó]n|nation)$/i.test(authorVal.trim())) {
     authorVal = '';
   }
-  const sourceName = parsedArticle.siteName || hostname.replace('www.', '');
-  const subtitleVal = parsedArticle.excerpt || pageSubtitle;
-  const kickerVal = pageKicker;
+  let sourceName = parsedArticle.siteName || hostname.replace('www.', '');
+  let subtitleVal = parsedArticle.excerpt || pageSubtitle;
+  let kickerVal = pageKicker;
+  let rawDate = pageDate;
+
+  // Apply sidepanel overrides if present
+  if (overrideData) {
+    if (overrideData.superabstract) title = overrideData.superabstract;
+    if (overrideData.autor !== undefined) authorVal = overrideData.autor;
+    if (overrideData.medio !== undefined) sourceName = overrideData.medio;
+    if (overrideData.fecha !== undefined) rawDate = overrideData.fecha;
+    if (overrideData.texto !== undefined && overrideData.texto.trim()) {
+      parsedArticle.content = overrideData.texto
+        .split('\n\n')
+        .map(p => `<p>${p.trim().replace(/\n/g, '<br>')}</p>`)
+        .join('\n');
+    }
+  }
+
+  const snapshotTitle = `${mainDomainUpper} - ${title}`;
+  const kickerValFinal = kickerVal; // keep original reference
 
   // Format date beautifully
-  let formattedDate = pageDate;
-  if (pageDate) {
+  let formattedDate = rawDate;
+  if (rawDate) {
     try {
-      const parsedDate = new Date(pageDate);
+      const parsedDate = new Date(rawDate);
       if (!isNaN(parsedDate.getTime())) {
         formattedDate = parsedDate.toLocaleDateString('es-MX', {
           year: 'numeric',
@@ -663,10 +702,74 @@ export async function getCleanSnapshotHTML(): Promise<{ html: string; title: str
       try {
         const clonedLogo = foundLogo.cloneNode(true) as Element;
         clonedLogo.removeAttribute('style');
+
+        // Copy computed colors/styles from live element to cloned element so that the standalone page has the correct colors
+        try {
+          const copyComputedStyles = (srcNode: Element, destNode: Element) => {
+            const computed = window.getComputedStyle(srcNode);
+            
+            // Inline critical styling properties
+            const fillVal = computed.fill;
+            const strokeVal = computed.stroke;
+            
+            if (fillVal && fillVal !== 'none' && fillVal !== 'rgba(0, 0, 0, 0)') {
+              destNode.setAttribute('fill', fillVal);
+            }
+            if (strokeVal && strokeVal !== 'none' && strokeVal !== 'rgba(0, 0, 0, 0)') {
+              destNode.setAttribute('stroke', strokeVal);
+            }
+            
+            // Recurse children
+            const srcChildren = Array.from(srcNode.children);
+            const destChildren = Array.from(destNode.children);
+            for (let i = 0; i < srcChildren.length && i < destChildren.length; i++) {
+              copyComputedStyles(srcChildren[i], destChildren[i]);
+            }
+          };
+          copyComputedStyles(foundLogo, clonedLogo);
+        } catch (styleCopyErr) {
+          console.warn('Error inlining computed logo styles:', styleCopyErr);
+        }
+
         if (clonedLogo.tagName.toLowerCase() === 'svg') {
+          // If the original has width/height or viewBox, let's calculate its aspect ratio to set width properly
+          const origWidthAttr = foundLogo.getAttribute('width');
+          const origHeightAttr = foundLogo.getAttribute('height');
+          const viewBox = foundLogo.getAttribute('viewBox');
+          
           clonedLogo.setAttribute('height', '32');
-          clonedLogo.removeAttribute('width');
+          
+          let aspectCalculated = false;
+          if (origWidthAttr && origHeightAttr) {
+            const w = parseFloat(origWidthAttr);
+            const h = parseFloat(origHeightAttr);
+            if (!isNaN(w) && !isNaN(h) && h > 0) {
+              const scaledWidth = Math.round((w / h) * 32);
+              clonedLogo.setAttribute('width', scaledWidth.toString());
+              aspectCalculated = true;
+            }
+          }
+          
+          if (!aspectCalculated && viewBox) {
+            const vbParts = viewBox.split(/[ ,]+/).map(parseFloat);
+            if (vbParts.length === 4) {
+              const vbW = vbParts[2];
+              const vbH = vbParts[3];
+              if (vbH > 0) {
+                const scaledWidth = Math.round((vbW / vbH) * 32);
+                clonedLogo.setAttribute('width', scaledWidth.toString());
+                aspectCalculated = true;
+              }
+            }
+          }
+          
+          if (!aspectCalculated) {
+            // If aspect ratio is unknown, do not remove width if it has one, or default to auto
+            clonedLogo.removeAttribute('width');
+          }
+          
           clonedLogo.classList.add('extracted-svg-logo');
+          
           if (isDarkTheme) {
             clonedLogo.setAttribute('fill', '#ffffff');
             clonedLogo.querySelectorAll('*').forEach(child => {
@@ -828,12 +931,12 @@ export async function getCleanSnapshotHTML(): Promise<{ html: string; title: str
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title}</title>
+  <title>${snapshotTitle}</title>
   <base href="${originalUrl}">
 
   <!-- SEO & Dynamic Previews (WhatsApp, Telegram, Facebook, Twitter, Slack, Discord) -->
   <meta name="description" content="${cleanSubtitle}">
-  <meta property="og:title" content="${title}">
+  <meta property="og:title" content="${snapshotTitle}">
   <meta property="og:description" content="${cleanSubtitle}">
   ${heroImageSrc ? `<meta property="og:image" content="${heroImageSrc}">` : ''}
   <meta property="og:url" content="${originalUrl}">
@@ -841,7 +944,7 @@ export async function getCleanSnapshotHTML(): Promise<{ html: string; title: str
   <meta property="og:site_name" content="${sourceName}">
   
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="${title}">
+  <meta name="twitter:title" content="${snapshotTitle}">
   <meta name="twitter:description" content="${cleanSubtitle}">
   ${heroImageSrc ? `<meta name="twitter:image" content="${heroImageSrc}">` : ''}
 
@@ -889,7 +992,9 @@ export async function getCleanSnapshotHTML(): Promise<{ html: string; title: str
 
     body {
       font-family: ${resolvedBodyFont};
+      color: #1e293b;
       color: var(--text-color);
+      background-color: ${resolvedBgColor};
       background-color: var(--bg-color);
       line-height: 1.65;
       margin: 0;
@@ -1302,6 +1407,12 @@ export async function getCleanSnapshotHTML(): Promise<{ html: string; title: str
       text-decoration: underline;
     }
 
+    /* Avoid breaking paragraphs, blockquotes, headers and images across PDF pages */
+    p, blockquote, img, .hero-container, .portal-top-bar, .article-header, .original-url-footer {
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
     /* Print Specific Stylesheet */
     @media print {
       body {
@@ -1350,36 +1461,38 @@ export async function getCleanSnapshotHTML(): Promise<{ html: string; title: str
     </div>
   </div>
 
-  <div class="portal-top-bar">
-    ${logoHtml}
-  </div>
+  <div id="pdf-capture-wrapper" style="width: 800px; margin: 0 auto; padding: 0; background: #ffffff; box-sizing: border-box; overflow: hidden; position: relative;">
+    <div class="portal-top-bar">
+      ${logoHtml}
+    </div>
 
-  <div class="container">
-    <div class="portal-masthead">
-      ${sectionName ? `
-      <div class="portal-section-bar">
-        <h2 class="portal-section-title">${sectionName}</h2>
-        <div class="portal-nav">${navLinksText}</div>
+    <div class="container">
+      <div class="portal-masthead">
+        ${sectionName ? `
+        <div class="portal-section-bar">
+          <h2 class="portal-section-title">${sectionName}</h2>
+          <div class="portal-nav">${navLinksText}</div>
+        </div>
+        ` : ''}
+        ${kickerHtml}
       </div>
-      ` : ''}
-      ${kickerHtml}
-    </div>
 
-    <div class="article-header">
-      <h1 class="article-title">${title}</h1>
-      ${subtitleHtml}
-      ${metaBlockHtml}
-    </div>
+      <div class="article-header">
+        <h1 class="article-title">${title}</h1>
+        ${subtitleHtml}
+        ${metaBlockHtml}
+      </div>
 
-    ${heroImageHtml}
+      ${heroImageHtml}
 
-    <div class="article-body">
-      ${parsedArticle.content}
-    </div>
+      <div class="article-body">
+        ${parsedArticle.content}
+      </div>
 
-    <div class="original-url-footer">
-      Documento generado por PortalScrapper.<br>
-      Nota original: <a href="${originalUrl}" target="_blank">${originalUrl}</a>
+      <div class="original-url-footer">
+        Documento generado por PortalScrapper.<br>
+        Nota original: <a href="${originalUrl}" target="_blank">${originalUrl}</a>
+      </div>
     </div>
   </div>
 </body>
@@ -1387,7 +1500,7 @@ export async function getCleanSnapshotHTML(): Promise<{ html: string; title: str
 
   return {
     html: finalHtml,
-    title,
+    title: snapshotTitle,
     originalUrl
   };
 }

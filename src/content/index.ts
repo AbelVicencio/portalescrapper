@@ -210,7 +210,7 @@ function setupMessageListener(): void {
       }
       handleExtractionRequest('explicit', msg.type === 'EXTRACT_NOW');
     } else if (msg.type === 'GET_CLEAN_SNAPSHOT') {
-      getCleanSnapshotHTML()
+      getCleanSnapshotHTML(msg.payload)
         .then((result) => {
           sendResponse(result);
         })
