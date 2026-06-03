@@ -21,9 +21,7 @@
     await chrome.storage.local.remove(STORAGE_KEY);
   }
   async function updateBadge(count) {
-    const total = count ?? (await getAllArticles()).length;
-    await chrome.action.setBadgeText({ text: total > 0 ? String(total) : "" });
-    await chrome.action.setBadgeBackgroundColor({ color: "#22c55e" });
+    await chrome.action.setBadgeText({ text: "" });
   }
 
   // src/background/service-worker.ts

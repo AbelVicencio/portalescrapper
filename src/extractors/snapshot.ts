@@ -31,7 +31,17 @@ export async function getCleanSnapshotHTML(overrideData?: {
   fecha?: string;
   medio?: string;
   medialogId?: string;
+  token?: string;
 }): Promise<{ html: string; title: string; originalUrl: string }> {
+  let html2pdfUrl = '';
+  let snapshotHelperUrl = '';
+  try {
+    html2pdfUrl = chrome.runtime.getURL('dist/html2pdf.bundle.min.js');
+    snapshotHelperUrl = chrome.runtime.getURL('dist/snapshot-helper.js');
+  } catch (e) {
+    console.warn('[PortalScrapper] Could not resolve resources URL:', e);
+  }
+
   // 1. Clone the current document to avoid mutating the live page
   const doc = document.cloneNode(true) as Document;
   const hostname = window.location.hostname;
@@ -77,7 +87,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
   ];
 
   const elpaisSelectors = [
-    '.tv-products', '.product-grid', '[class*="asus"]', '.nav-secondary', 
+    '.tv-products', '.product-grid', '[class*="asus"]', '.nav-secondary',
     '.newsletter-box', '.modulo-suscripcion', '.promo-box', '.suscribete-box'
   ];
 
@@ -86,11 +96,20 @@ export async function getCleanSnapshotHTML(overrideData?: {
     '.tags-container', '.banner-container', '.sidebar-container'
   ];
 
+  const wsjSelectors = [
+    'form', '[class*="insetComponents"]', '[class*="Disclaimer"]', '[id*="feedback"]',
+    '[class*="QuickSummary" i]', '[class*="quick-summary" i]', '[data-testid*="quick-summary" i]',
+    '[class*="KeyPoints" i]', '[class*="key-points" i]', '[class*="SummaryBullets" i]', '[class*="summary-bullets" i]',
+    '[class*="AiSummary" i]', '[class*="ai-summary" i]'
+  ];
+
   let selectorsToClean = [...generalNoiseSelectors];
   if (hostname.includes('elpais.com')) {
     selectorsToClean = [...selectorsToClean, ...elpaisSelectors];
   } else if (hostname.includes('milenio.com')) {
     selectorsToClean = [...selectorsToClean, ...milenioSelectors];
+  } else if (hostname.includes('wsj.com')) {
+    selectorsToClean = [...selectorsToClean, ...wsjSelectors];
   }
 
   for (const selector of selectorsToClean) {
@@ -109,12 +128,12 @@ export async function getCleanSnapshotHTML(overrideData?: {
     if (!text) return;
 
     const lower = text.toLowerCase();
-    
+
     // Remove explicit ad placeholders like "[Publicidad]" or "[ publicidad ]"
     if (
-      lower === '[publicidad]' || 
-      lower === '[ publicidad ]' || 
-      lower === 'publicidad' || 
+      lower === '[publicidad]' ||
+      lower === '[ publicidad ]' ||
+      lower === 'publicidad' ||
       /^\[\s*publicidad\s*\]$/i.test(text)
     ) {
       el.remove();
@@ -145,11 +164,11 @@ export async function getCleanSnapshotHTML(overrideData?: {
 
     // Remove inline related note banners (e.g. "Leer también ...")
     if (
-      (lower.startsWith('leer también') || 
-       lower.startsWith('leer tambien') || 
-       lower.startsWith('lee también') || 
-       lower.startsWith('lee tambien') || 
-       lower.startsWith('te recomendamos')) && 
+      (lower.startsWith('leer también') ||
+        lower.startsWith('leer tambien') ||
+        lower.startsWith('lee también') ||
+        lower.startsWith('lee tambien') ||
+        lower.startsWith('te recomendamos')) &&
       text.length < 250
     ) {
       el.remove();
@@ -159,8 +178,8 @@ export async function getCleanSnapshotHTML(overrideData?: {
     // Remove El Universal social/newsletter spam
     if (
       ((lower.includes('únete a nuestro canal') && lower.includes('whatsapp')) ||
-       (lower.includes('recibir directo en tu correo') && lower.includes('suscríbete')) ||
-       lower.includes('recibe las noticias más relevantes del día')) &&
+        (lower.includes('recibir directo en tu correo') && lower.includes('suscríbete')) ||
+        lower.includes('recibe las noticias más relevantes del día')) &&
       text.length < 300
     ) {
       el.remove();
@@ -181,15 +200,20 @@ export async function getCleanSnapshotHTML(overrideData?: {
 
   // 3. Extract the largest main hero image before Readability parses the document
   let heroImageSrc = '';
-  
+  const isPressReaderCover = (url: string) => {
+    if (!url) return false;
+    const lower = url.toLowerCase();
+    return (lower.includes('prcdn.co') || lower.includes('pressreader.com')) && lower.includes('page=');
+  };
+
   // Try OpenGraph image first
   const ogImg = doc.querySelector('meta[property="og:image"]')?.getAttribute('content');
-  if (ogImg) {
+  if (ogImg && !isPressReaderCover(ogImg)) {
     heroImageSrc = ogImg;
   } else {
     // Try Twitter image
     const twitterImg = doc.querySelector('meta[name="twitter:image"]')?.getAttribute('content');
-    if (twitterImg) {
+    if (twitterImg && !isPressReaderCover(twitterImg)) {
       heroImageSrc = twitterImg;
     } else {
       // Find largest image in article body or document
@@ -197,7 +221,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
       let maxArea = 0;
       for (const img of images) {
         const src = img.getAttribute('src');
-        if (!src || src.startsWith('data:')) continue;
+        if (!src || src.startsWith('data:') || isPressReaderCover(src)) continue;
         const width = parseInt(img.getAttribute('width') || '0', 10);
         const height = parseInt(img.getAttribute('height') || '0', 10);
         const area = width * height;
@@ -210,7 +234,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
       if (!heroImageSrc) {
         for (const img of images) {
           const src = img.getAttribute('src');
-          if (src && !src.startsWith('data:') && !/icon|logo|avatar|social/i.test(src)) {
+          if (src && !src.startsWith('data:') && !/icon|logo|avatar|social/i.test(src) && !isPressReaderCover(src)) {
             heroImageSrc = src;
             break;
           }
@@ -223,7 +247,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
   if (heroImageSrc && !heroImageSrc.startsWith('http')) {
     try {
       heroImageSrc = new URL(heroImageSrc, originalUrl).href;
-    } catch {}
+    } catch { }
   }
 
   // 4. Try to extract metadata if not handled well by Readability
@@ -233,9 +257,9 @@ export async function getCleanSnapshotHTML(overrideData?: {
     pageAuthor = el?.textContent?.trim() || '';
   }
   if (!pageAuthor) {
-    pageAuthor = doc.querySelector('meta[name="author"]')?.getAttribute('content') || 
-                 doc.querySelector('meta[property="article:author"]')?.getAttribute('content') || 
-                 doc.querySelector('[itemprop="author"]')?.textContent?.trim() || '';
+    pageAuthor = doc.querySelector('meta[name="author"]')?.getAttribute('content') ||
+      doc.querySelector('meta[property="article:author"]')?.getAttribute('content') ||
+      doc.querySelector('[itemprop="author"]')?.textContent?.trim() || '';
   }
 
   let pageDate = '';
@@ -252,15 +276,23 @@ export async function getCleanSnapshotHTML(overrideData?: {
     pageDate = el?.getAttribute('datetime') || el?.textContent?.trim() || '';
   }
   if (!pageDate) {
-    pageDate = doc.querySelector('meta[property="article:published_time"]')?.getAttribute('content') || 
-               doc.querySelector('time[datetime]')?.getAttribute('datetime') || 
-               doc.querySelector('time')?.textContent?.trim() || '';
+    pageDate = doc.querySelector('meta[property="article:published_time"]')?.getAttribute('content') ||
+      doc.querySelector('time[datetime]')?.getAttribute('datetime') ||
+      doc.querySelector('time')?.textContent?.trim() || '';
   }
 
-  const pageSubtitle = doc.querySelector('meta[name="description"]')?.getAttribute('content') || 
-                       doc.querySelector('meta[property="og:description"]')?.getAttribute('content') || 
-                       doc.querySelector('.article-lead')?.textContent?.trim() || 
-                       doc.querySelector('.article-subtitle')?.textContent?.trim() || '';
+  let pageSubtitle = doc.querySelector('meta[name="description"]')?.getAttribute('content') ||
+    doc.querySelector('meta[property="og:description"]')?.getAttribute('content') ||
+    doc.querySelector('.article-lead')?.textContent?.trim() ||
+    doc.querySelector('.article-subtitle')?.textContent?.trim() || '';
+
+  if (pageSubtitle) {
+    const isGeneric = pageSubtitle.toLowerCase().includes('pressreader.com') &&
+      (pageSubtitle.toLowerCase().includes('periódicos') || pageSubtitle.toLowerCase().includes('replicas') || pageSubtitle.toLowerCase().includes('réplicas'));
+    if (isGeneric) {
+      pageSubtitle = '';
+    }
+  }
 
   let pageKicker = doc.querySelector('.article-kicker')?.textContent?.trim() || '';
   if (!pageKicker) {
@@ -286,8 +318,8 @@ export async function getCleanSnapshotHTML(overrideData?: {
     extractedSection = doc.querySelector(siteConfig.selectors.section)?.textContent?.trim() || '';
   }
   if (!extractedSection) {
-    extractedSection = doc.querySelector('meta[property="article:section"]')?.getAttribute('content') || 
-                       doc.querySelector('.article-section')?.textContent?.trim() || '';
+    extractedSection = doc.querySelector('meta[property="article:section"]')?.getAttribute('content') ||
+      doc.querySelector('.article-section')?.textContent?.trim() || '';
   }
   if (!extractedSection) {
     extractedSection = pageKicker;
@@ -334,7 +366,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
     // 3. Fecha / Lugar (ej: "Cd. de México (30 mayo 2026) .-17:35 hrs")
     const dateEl = doc.querySelector('.date, .fecha');
     let dateText = dateEl?.textContent?.trim() || '';
-    
+
     if (!dateText || dateText.length >= 150 || dateText.includes('MIN') || dateText.includes('Autor')) {
       for (const el of allDivsSpans) {
         const text = el.textContent?.trim() || '';
@@ -382,7 +414,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
   // Remove duplicate hero image from article body if it exists
   if (heroImageSrc) {
     try {
-      const bodyDoc = new DOMParser().parseFromString(parsedArticle.content, 'text/html');
+      const bodyDoc = new DOMParser().parseFromString(parsedArticle.content || '', 'text/html');
       const heroUrlClean = heroImageSrc.split('?')[0].split('#')[0];
       const bodyImages = Array.from(bodyDoc.querySelectorAll('img, picture'));
       let removedAny = false;
@@ -411,7 +443,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
               removedAny = true;
               break;
             }
-          } catch {}
+          } catch { }
         }
       }
 
@@ -430,6 +462,9 @@ export async function getCleanSnapshotHTML(overrideData?: {
   }
   let sourceName = parsedArticle.siteName || hostname.replace('www.', '');
   let subtitleVal = parsedArticle.excerpt || pageSubtitle;
+  if (subtitleVal && hostname.includes('pressreader.com') && subtitleVal.trim().startsWith('PressReader.com')) {
+    subtitleVal = '';
+  }
   let kickerVal = pageKicker;
   let rawDate = pageDate;
 
@@ -464,7 +499,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
           minute: '2-digit'
         });
       }
-    } catch {}
+    } catch { }
   }
 
   // Build metadata blocks
@@ -473,7 +508,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
     const readingTime = reformaReadingTime || '02 MIN 30 SEG';
     const author = reformaAuthor || authorVal;
     const datePlace = reformaDatePlace || formattedDate || 'Cd. de México';
-    
+
     metaBlockHtml = `
       <div class="reforma-meta">
         ${readingTime ? `<div class="reforma-meta-reading">${readingTime}</div>` : ''}
@@ -504,7 +539,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
         <strong>${formattedDate}</strong>
       </div>
     ` : '';
-    
+
     metaBlockHtml = `
       <div class="article-meta">
         ${authorHtml}
@@ -533,7 +568,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
         }
       }
     }
-  } catch {}
+  } catch { }
 
 
   // Resolve Brand Info (Theme Color & Logo)
@@ -561,7 +596,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
             }
           }
         }
-      } catch {}
+      } catch { }
     }
   }
 
@@ -572,7 +607,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
     const g = parseInt(hex.substring(2, 4), 16);
     const b = parseInt(hex.substring(4, 6), 16);
     const luminance = (r * 299 + g * 587 + b * 114) / 1000;
-    isDarkTheme = luminance < 140; 
+    isDarkTheme = luminance < 140;
   } catch {
     isDarkTheme = true;
   }
@@ -637,11 +672,11 @@ export async function getCleanSnapshotHTML(overrideData?: {
           const ariaLabel = link.getAttribute('aria-label') || '';
           const idStr = link.id || '';
           const hasDescendantLogoAttr = !!link.querySelector('[class*="logo" i], [id*="logo" i], [data-testid*="logo" i], [data-qa*="logo" i], [aria-label*="logo" i], [label*="logo" i], [alt*="logo" i], [aria-label*="homepage" i]');
-          
-          const isProbablyLogoLink = /logo|brand|home/i.test(classStr) || 
-                                     /logo|home|brand/i.test(ariaLabel) || 
-                                     /logo|brand/i.test(idStr) || 
-                                     hasDescendantLogoAttr;
+
+          const isProbablyLogoLink = /logo|brand|home/i.test(classStr) ||
+            /logo|home|brand/i.test(ariaLabel) ||
+            /logo|brand/i.test(idStr) ||
+            hasDescendantLogoAttr;
 
           if (isProbablyLogoLink) {
             // First check if it contains any SVG or img at all, since the link is identified as a logo link
@@ -707,18 +742,18 @@ export async function getCleanSnapshotHTML(overrideData?: {
         try {
           const copyComputedStyles = (srcNode: Element, destNode: Element) => {
             const computed = window.getComputedStyle(srcNode);
-            
+
             // Inline critical styling properties
             const fillVal = computed.fill;
             const strokeVal = computed.stroke;
-            
+
             if (fillVal && fillVal !== 'none' && fillVal !== 'rgba(0, 0, 0, 0)') {
               destNode.setAttribute('fill', fillVal);
             }
             if (strokeVal && strokeVal !== 'none' && strokeVal !== 'rgba(0, 0, 0, 0)') {
               destNode.setAttribute('stroke', strokeVal);
             }
-            
+
             // Recurse children
             const srcChildren = Array.from(srcNode.children);
             const destChildren = Array.from(destNode.children);
@@ -736,9 +771,9 @@ export async function getCleanSnapshotHTML(overrideData?: {
           const origWidthAttr = foundLogo.getAttribute('width');
           const origHeightAttr = foundLogo.getAttribute('height');
           const viewBox = foundLogo.getAttribute('viewBox');
-          
+
           clonedLogo.setAttribute('height', '32');
-          
+
           let aspectCalculated = false;
           if (origWidthAttr && origHeightAttr) {
             const w = parseFloat(origWidthAttr);
@@ -749,7 +784,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
               aspectCalculated = true;
             }
           }
-          
+
           if (!aspectCalculated && viewBox) {
             const vbParts = viewBox.split(/[ ,]+/).map(parseFloat);
             if (vbParts.length === 4) {
@@ -762,14 +797,14 @@ export async function getCleanSnapshotHTML(overrideData?: {
               }
             }
           }
-          
+
           if (!aspectCalculated) {
             // If aspect ratio is unknown, do not remove width if it has one, or default to auto
             clonedLogo.removeAttribute('width');
           }
-          
+
           clonedLogo.classList.add('extracted-svg-logo');
-          
+
           if (isDarkTheme) {
             clonedLogo.setAttribute('fill', '#ffffff');
             clonedLogo.querySelectorAll('*').forEach(child => {
@@ -789,7 +824,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
           if (src && !src.startsWith('http') && !src.startsWith('data:')) {
             try {
               src = new URL(src, originalUrl).href;
-            } catch {}
+            } catch { }
           }
           if (src && src.startsWith('http')) {
             try {
@@ -835,9 +870,9 @@ export async function getCleanSnapshotHTML(overrideData?: {
                     }
                   }
                 }
-              } catch {} // CORS may block cross-origin stylesheet access — skip silently
+              } catch { } // CORS may block cross-origin stylesheet access — skip silently
             }
-          } catch {}
+          } catch { }
 
           // Fallback: if cssRules didn't yield @font-face, fetch external stylesheets and parse them
           if (!extractedFontFaceCSS) {
@@ -876,9 +911,9 @@ export async function getCleanSnapshotHTML(overrideData?: {
                     }
                   }
                   if (extractedFontFaceCSS) break; // Found what we need, stop fetching more sheets
-                } catch {} // Network/CORS error on individual sheet
+                } catch { } // Network/CORS error on individual sheet
               }
-            } catch {}
+            } catch { }
           }
 
           // Build the logo with the page's real font, plus quality serif fallbacks
@@ -911,8 +946,8 @@ export async function getCleanSnapshotHTML(overrideData?: {
   ` : '';
 
   // Nav bar links inside the subheader
-  const navLinksText = navLinks.length > 0 
-    ? navLinks.join(' • ') 
+  const navLinksText = navLinks.length > 0
+    ? navLinks.join(' • ')
     : 'NACIONAL • INTERNACIONAL • OPINIÓN • ECONOMÍA • CIENCIA • TENDENCIAS • CULTURA';
 
   const resolvedBgColor = siteConfig?.contentBgColor || '#ffffff';
@@ -920,10 +955,6 @@ export async function getCleanSnapshotHTML(overrideData?: {
   const resolvedTitleFont = siteConfig?.titleFontFamily || "'Playfair Display', 'Times New Roman', serif";
 
   const cleanSubtitle = (subtitleVal || '').replace(/"/g, '&quot;').replace(/[\r\n]+/g, ' ').trim();
-  const jsonLdAuthor = (authorVal || '').replace(/"/g, '\\"').trim() || 'Redacción';
-  const jsonLdTitle = title.replace(/"/g, '\\"');
-  const jsonLdPublisher = sourceName.replace(/"/g, '\\"');
-  const jsonLdImage = heroImageSrc ? `"${heroImageSrc}"` : '[]';
 
   // Compose the premium PrintFriendly snapshot HTML
   const finalHtml = `<!DOCTYPE html>
@@ -951,24 +982,9 @@ export async function getCleanSnapshotHTML(overrideData?: {
   <!-- Premium color accent for link preview sidebars (Telegram, Discord, Slack) -->
   <meta name="theme-color" content="${themeColor}">
 
-  <!-- Schema.org Structured Metadata for Crawlers & Previews -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "NewsArticle",
-    "headline": "${jsonLdTitle}",
-    "image": ${jsonLdImage.startsWith('"') ? `[${jsonLdImage}]` : '[]'},
-    "datePublished": "${pageDate || new Date().toISOString()}",
-    "author": [{
-      "@type": "Person",
-      "name": "${jsonLdAuthor}"
-    }],
-    "publisher": {
-      "@type": "Organization",
-      "name": "${jsonLdPublisher}"
-    }
-  }
-  </script>
+  ${html2pdfUrl ? `<script src="${html2pdfUrl}"></script>` : ''}
+  ${snapshotHelperUrl ? `<script src="${snapshotHelperUrl}"></script>` : ''}
+
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1000,6 +1016,43 @@ export async function getCleanSnapshotHTML(overrideData?: {
       margin: 0;
       padding: 0;
       -webkit-font-smoothing: antialiased;
+    }
+
+    /* Local Alert Banner */
+    .local-alert {
+      position: fixed;
+      top: 80px;
+      right: 24px;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      z-index: 2000;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      opacity: 0;
+      transform: translateY(-20px);
+      pointer-events: none;
+    }
+    .local-alert.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .local-alert.success {
+      background-color: #f0fdf4;
+      color: #166534;
+      border: 1px solid #bbf7d0;
+    }
+    .local-alert.warning {
+      background-color: #fffbeb;
+      color: #92400e;
+      border: 1px solid #fef3c7;
+    }
+    .local-alert.error {
+      background-color: #fef2f2;
+      color: #991b1b;
+      border: 1px solid #fca5a5;
     }
 
     /* Floating Action Bar */
@@ -1172,9 +1225,51 @@ export async function getCleanSnapshotHTML(overrideData?: {
 
     /* Content Container */
     .container {
-      max-width: 740px;
-      margin: 40px auto;
-      padding: 0 24px;
+      width: 95%;
+      max-width: 1000px;
+      margin: 30px auto;
+      padding: 0 20px;
+      box-sizing: border-box;
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        width: 100%;
+        margin: 10px auto;
+        padding: 0 12px;
+      }
+      .portal-top-bar {
+        padding: 10px 14px;
+        min-height: 48px;
+      }
+      .brand-text-logo {
+        font-size: 20px !important;
+      }
+      .extracted-svg-logo {
+        max-height: 24px !important;
+      }
+      .extracted-img-logo {
+        max-height: 28px !important;
+      }
+      .article-title {
+        font-size: 22px !important;
+        line-height: 1.3 !important;
+        margin-bottom: 12px !important;
+      }
+      .article-subtitle {
+        font-size: 14px !important;
+        line-height: 1.45 !important;
+        margin-bottom: 14px !important;
+      }
+      #readability-page-1 {
+        font-size: 15px !important;
+        line-height: 1.6 !important;
+      }
+      p {
+        font-size: 15px !important;
+        line-height: 1.6 !important;
+        margin-bottom: 14px !important;
+      }
     }
 
     /* Header styling */
@@ -1318,7 +1413,8 @@ export async function getCleanSnapshotHTML(overrideData?: {
 
     /* Hero Image */
     .hero-container {
-      max-width: 600px;
+      width: 100%;
+      max-width: 800px;
       margin: 0 auto 36px auto;
       border-radius: 8px;
       overflow: hidden;
@@ -1449,7 +1545,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
     }
   </style>
 </head>
-<body>
+<body data-medialog-id="${overrideData?.medialogId || ''}" data-superabstract="${(overrideData?.superabstract || '').replace(/"/g, '&quot;')}" data-api-token="${overrideData?.token || ''}">
   <div class="action-bar">
     <div class="brand">
       <span>📰 PortalScrapper Snapshot</span>
@@ -1457,6 +1553,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
     <div class="buttons">
       <button class="btn" id="btn-snapshot-close">❌ Cerrar</button>
       <button class="btn" id="btn-snapshot-save">💾 Guardar HTML</button>
+      <button class="btn" id="btn-snapshot-upload" style="background-color: #0284c7; border-color: #0284c7; color: white;">📤 Guardar PDF</button>
       <button class="btn btn-primary" id="btn-snapshot-print">🖨️ Imprimir</button>
     </div>
   </div>
@@ -1490,7 +1587,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
       </div>
 
       <div class="original-url-footer">
-        Documento generado por PortalScrapper.<br>
+        Documento generado por Medialog.<br>
         Nota original: <a href="${originalUrl}" target="_blank">${originalUrl}</a>
       </div>
     </div>

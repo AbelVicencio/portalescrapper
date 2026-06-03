@@ -230,6 +230,11 @@ function collectText(selector: string): string {
     });
 
     return sortedNodes
+      .filter((n) => {
+        const el = n as HTMLElement;
+        const isSummary = el.closest('[class*="QuickSummary" i], [class*="quick-summary" i], [data-testid*="quick-summary" i], [class*="KeyPoints" i], [class*="key-points" i], [class*="SummaryBullets" i], [class*="summary-bullets" i], [class*="AiSummary" i], [class*="ai-summary" i]');
+        return !isSummary;
+      })
       .map((n) => {
         const el = n as HTMLElement;
         return (el.innerText || el.textContent || '').trim();
@@ -240,6 +245,11 @@ function collectText(selector: string): string {
 
   const nodes = document.querySelectorAll(selector);
   return Array.from(nodes)
+    .filter((n) => {
+      const el = n as HTMLElement;
+      const isSummary = el.closest('[class*="QuickSummary" i], [class*="quick-summary" i], [data-testid*="quick-summary" i], [class*="KeyPoints" i], [class*="key-points" i], [class*="SummaryBullets" i], [class*="summary-bullets" i], [class*="AiSummary" i], [class*="ai-summary" i]');
+      return !isSummary;
+    })
     .map((n) => {
       const el = n as HTMLElement;
       return (el.innerText || el.textContent || '').trim();
@@ -459,10 +469,28 @@ export function cleanWSJText(text: string): string {
 
   if (filtered.length === 0) return '';
 
-  // 2. Find the start index (first real paragraph of summary or story)
-  let startIndex = 0;
+  // 1b. Deduplicate summary bullets at the start and filter out leading noise particles (like "and")
+  const processed: string[] = [];
   for (let i = 0; i < filtered.length; i++) {
     const p = filtered[i];
+    const isDuplicateSummaryBullet = i < 8 && p.length > 25 && filtered.slice(i + 1).some(other => other === p);
+    
+    // Skip single words/leftovers like "and" at the very beginning of the text
+    if (i < 3 && (p.toLowerCase() === 'and' || p.toLowerCase() === 'a' || p.length < 5)) {
+      continue;
+    }
+    
+    if (!isDuplicateSummaryBullet) {
+      processed.push(p);
+    }
+  }
+
+  if (processed.length === 0) return '';
+
+  // 2. Find the start index (first real paragraph of summary or story)
+  let startIndex = 0;
+  for (let i = 0; i < processed.length; i++) {
+    const p = processed[i];
     
     // Skip short metadata lines
     if (p === 'Listen' || p === 'By' || p.match(/^\(\d+\s*min\)$/i)) {
@@ -493,56 +521,112 @@ export function cleanWSJText(text: string): string {
   }
 
   // 3. Find the end index (last paragraph of the actual story)
-  let endIndex = filtered.length - 1;
-  for (let i = filtered.length - 1; i >= 0; i--) {
-    const p = filtered[i];
-    
-    // Skip copyright notices
-    if (p.includes('Copyright ©') || p.includes('All Rights Reserved') || p.includes('Dow Jones & Company')) {
-      continue;
-    }
-    
-    // Skip author biographies
-    if (p.match(/is a rewrite editor/i) || p.match(/is a reporter/i) || p.includes('rewrite editor at The Wall Street Journal')) {
-      continue;
-    }
-    
-    // Skip recommended bottom lists, newsletters, videos or opinion bars
+  // First, scan forward from startIndex to find any definitive footer or consent notices
+  // which indicate the absolute end of the article's story content. Discard that paragraph and all subsequent text.
+  let endIndex = processed.length - 1;
+  for (let i = startIndex; i < processed.length; i++) {
+    const p = processed[i].toLowerCase();
     if (
-      p === 'Autos' ||
-      p === 'Climate and Energy Newsletter' ||
-      p === 'Latin America News' ||
-      p === 'Heard on the Street' ||
-      p === 'Earnings' ||
-      p === 'Whats News Newsletter' ||
-      p === 'Videos' ||
-      p.includes('Most Popular') ||
-      p.includes('OPINION') ||
-      p.includes('Recommended Videos') ||
-      p.includes('Inside Israel’s High-Tech') ||
-      p.includes('Quantum Computing') ||
-      p.includes('Opinion:')
+      p.includes('submitting your response') ||
+      p.includes('submitting your responses') ||
+      p.includes('consent to dow jones') ||
+      p.includes('dow jones processing') ||
+      p.includes('special categories of') ||
+      p.includes('questionnaire') ||
+      p.includes('write to ') ||
+      (p.includes('contact ') && p.includes('@')) ||
+      (p.includes('appeared in the ') && p.includes('print edition')) ||
+      p.includes('corrections & amplifications') ||
+      p.includes('copyright ©') ||
+      p.includes('all rights reserved') ||
+      p.includes('dow jones & company')
     ) {
-      continue;
+      endIndex = i - 1;
+      break;
     }
-    
-    // Skip paragraphs that don't look like final sentences (e.g. short tags or headers)
-    if (p.length < 40) {
-      continue;
+  }
+
+  // If we didn't find an explicit cutoff point above, fall back to the standard backward scanner
+  if (endIndex === processed.length - 1) {
+    for (let i = processed.length - 1; i >= startIndex; i--) {
+      const p = processed[i];
+      
+      // Skip copyright notices
+      if (p.includes('Copyright ©') || p.includes('All Rights Reserved') || p.includes('Dow Jones & Company')) {
+        continue;
+      }
+      
+      // Skip author biographies
+      if (p.match(/is a rewrite editor/i) || p.match(/is a reporter/i) || p.includes('rewrite editor at The Wall Street Journal')) {
+        continue;
+      }
+      
+      // Skip "Write to ..." or "Contact ..." footers (often containing email addresses)
+      if (p.toLowerCase().includes('write to ') || (p.toLowerCase().includes('contact ') && p.includes('@'))) {
+        continue;
+      }
+
+      // Skip "Appeared in the ... print edition as ..." footers
+      if (p.includes('Appeared in the ') && p.includes('print edition')) {
+        continue;
+      }
+
+      // Skip contributor credits
+      if (p.toLowerCase().includes('contributed to this article')) {
+        continue;
+      }
+
+      // Skip corrections and amplifications
+      if (p.includes('Corrections & Amplifications')) {
+        continue;
+      }
+
+      // Skip questionnaire consent or data processing notices
+      if (
+        p.toLowerCase().includes('submitting your response') ||
+        p.toLowerCase().includes('consent to dow jones') ||
+        p.toLowerCase().includes('questionnaire')
+      ) {
+        continue;
+      }
+      
+      // Skip recommended bottom lists, newsletters, videos or opinion bars
+      if (
+        p === 'Autos' ||
+        p === 'Climate and Energy Newsletter' ||
+        p === 'Latin America News' ||
+        p === 'Heard on the Street' ||
+        p === 'Earnings' ||
+        p === 'Whats News Newsletter' ||
+        p === 'Videos' ||
+        p.includes('Most Popular') ||
+        p.includes('OPINION') ||
+        p.includes('Recommended Videos') ||
+        p.includes('Inside Israel’s High-Tech') ||
+        p.includes('Quantum Computing') ||
+        p.includes('Opinion:')
+      ) {
+        continue;
+      }
+      
+      // Skip paragraphs that don't look like final sentences (e.g. short tags or headers)
+      if (p.length < 40) {
+        continue;
+      }
+      
+      // We found the last story paragraph!
+      endIndex = i;
+      break;
     }
-    
-    // We found the last story paragraph!
-    endIndex = i;
-    break;
   }
 
   // If search got crossed, return everything filtered
   if (startIndex > endIndex) {
-    return filtered.join('\n\n');
+    return processed.join('\n\n');
   }
 
   // Slice list to get exactly the article contents
-  const sliced = filtered.slice(startIndex, endIndex + 1);
+  const sliced = processed.slice(startIndex, endIndex + 1);
 
   // 4. Do a final clean-up of intermediate noise (like intermediate AI summaries tags)
   return sliced

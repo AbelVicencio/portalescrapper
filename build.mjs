@@ -28,6 +28,11 @@ const entryPoints = [
     outfile: "dist/sidepanel.js",
     ...commonOptions,
   },
+  {
+    entryPoints: ["src/sidepanel/snapshot-helper.ts"],
+    outfile: "dist/snapshot-helper.js",
+    ...commonOptions,
+  },
 ];
 
 function incrementVersion() {

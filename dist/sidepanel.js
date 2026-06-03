@@ -25,9 +25,7 @@
     console.log("[PortalScrapper] chrome.storage.local completamente borrado (forzar pruebas API)");
   }
   async function updateBadge(count) {
-    const total = count ?? (await getAllArticles()).length;
-    await chrome.action.setBadgeText({ text: total > 0 ? String(total) : "" });
-    await chrome.action.setBadgeBackgroundColor({ color: "#22c55e" });
+    await chrome.action.setBadgeText({ text: "" });
   }
 
   // src/utils/clipboard.ts
@@ -798,10 +796,51 @@
     if (extraClass) t.classList.add(...extraClass.split(" "));
     t.classList.add("show");
     setTimeout(() => {
-      t.classList.remove("show");
-      if (extraClass) t.classList.remove(...extraClass.split(" "));
+      if (t) {
+        t.classList.remove("show");
+        if (extraClass) t.classList.remove(...extraClass.split(" "));
+      }
     }, timeout);
   }
+  window.showToast = showToast;
+  window.copyPrintPathToClipboard = async function(medialogId) {
+    try {
+      const result = await chrome.storage.local.get("pdfDefaultFolder");
+      const defaultFolder = result.pdfDefaultFolder || "\\\\10.0.5.225\\rec24h\\mediarchivos\\medialogs";
+      const fullNetworkPath = `${defaultFolder}\\${medialogId}.pdf`;
+      await navigator.clipboard.writeText(fullNetworkPath);
+      showToast("\u{1F4CB} Ruta de red y nombre copiados al clipboard", 2500, "large green");
+    } catch (err) {
+      console.warn("Error copying print path to clipboard:", err);
+    }
+  };
+  window.uploadPdfBlob = async function(blob, medialogId) {
+    const extension = "pdf";
+    const nomArchivo = `${medialogId}.${extension}`;
+    const formData = new FormData();
+    formData.append("file1", blob, nomArchivo);
+    formData.append("nomArchivo", nomArchivo);
+    formData.append("tamanio", blob.size.toString());
+    formData.append("extension", extension);
+    const titleClean = el("superabstract")?.value || `${medialogId}`;
+    formData.append("texto", `${titleClean.replace(/[/\\?%*:|"<>]/g, "-").trim()}.pdf`);
+    formData.append("cabeza", "");
+    formData.append("fDocumento", "");
+    const response = await fetch("https://www.medialog.com.mx/portales/CargaPDF.asp?Func=2", {
+      method: "POST",
+      body: formData,
+      credentials: "include"
+    });
+    if (!response.ok) {
+      throw new Error(`Servidor respondi\xF3 con c\xF3digo HTTP ${response.status}`);
+    }
+    const responseText = await response.text();
+    if (!responseText.includes("archivo adjunto cargado") && !responseText.includes("Guardando Adjunto")) {
+      console.error("[PortalScrapper] Respuesta del servidor:", responseText);
+      throw new Error("El servidor no confirm\xF3 el \xE9xito de la carga.");
+    }
+    return true;
+  };
   async function renderHistory() {
     const container = el("history-list");
     if (!container) return;
@@ -1344,7 +1383,8 @@
         autor: el("autor")?.value || "",
         fecha: el("fecha_transcripcion")?.value || "",
         medio: el("medio")?.value || "",
-        medialogId: el("dbRecordId")?.value || ""
+        medialogId: el("dbRecordId")?.value || "",
+        token: currentToken || ""
       };
       const response = await new Promise((resolve, reject) => {
         chrome.runtime.sendMessage(
@@ -1375,70 +1415,11 @@
       printWindow.document.open();
       printWindow.document.write(html);
       printWindow.document.close();
-      const closeBtn = printWindow.document.getElementById("btn-snapshot-close");
-      const printBtn = printWindow.document.getElementById("btn-snapshot-print");
-      if (closeBtn) {
-        closeBtn.addEventListener("click", () => {
-          printWindow.close();
-        });
-      }
-      if (printBtn) {
-        printBtn.addEventListener("click", async () => {
-          try {
-            const dbIdInput = el("dbRecordId");
-            const dbIdVal = dbIdInput?.value || "";
-            const medialogId = parseInt(dbIdVal, 10);
-            if (medialogId && !isNaN(medialogId)) {
-              const result = await chrome.storage.local.get("pdfDefaultFolder");
-              const defaultFolder = result.pdfDefaultFolder || "\\\\10.0.5.225\\rec24h\\mediarchivos\\medialogs";
-              const fullNetworkPath = `${defaultFolder}\\${medialogId}.pdf`;
-              await printWindow.navigator.clipboard.writeText(fullNetworkPath);
-              showToast("\u{1F4CB} Ruta de red y nombre copiados al clipboard", 2500, "large green");
-            }
-          } catch (clipErr) {
-            console.warn("Error copying print path to clipboard:", clipErr);
-          }
-          printWindow.print();
-        });
-      }
-      const saveBtn = printWindow.document.getElementById("btn-snapshot-save");
-      if (saveBtn) {
-        saveBtn.addEventListener("click", () => {
-          const cleanTitle = (response.payload.title || "snapshot").replace(/[/\\?%*:|"<>]/g, "-").trim();
-          const filename = `${cleanTitle}.html`;
-          let savedHtml = html;
-          try {
-            const docParser = new DOMParser().parseFromString(html, "text/html");
-            const actionBar = docParser.querySelector(".action-bar");
-            if (actionBar) {
-              actionBar.remove();
-            }
-            savedHtml = "<!DOCTYPE html>\n" + docParser.documentElement.outerHTML;
-          } catch (e) {
-            console.warn("[PortalScrapper] Error cleaning action-bar from saved HTML:", e);
-          }
-          const blob = new Blob([savedHtml], { type: "text/html;charset=utf-8" });
-          const url = URL.createObjectURL(blob);
-          const a = printWindow.document.createElement("a");
-          a.href = url;
-          a.download = filename;
-          printWindow.document.body.appendChild(a);
-          a.click();
-          setTimeout(() => {
-            printWindow.document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-          }, 100);
-        });
-      }
-      try {
-        const dbIdInput = el("dbRecordId");
-        const dbIdVal = dbIdInput?.value || "";
-        const medialogId = parseInt(dbIdVal, 10);
-        if (medialogId && !isNaN(medialogId)) {
-          printWindow.document.title = `${medialogId}`;
-        }
-      } catch (titleErr) {
-        console.warn("Error setting document title:", titleErr);
+      const dbIdInput = el("dbRecordId");
+      const dbIdVal = dbIdInput?.value || "";
+      const medialogId = parseInt(dbIdVal, 10);
+      if (medialogId && !isNaN(medialogId)) {
+        printWindow.document.title = `${medialogId}`;
       }
       showToast("Snapshot generado con \xE9xito");
     } catch (err) {

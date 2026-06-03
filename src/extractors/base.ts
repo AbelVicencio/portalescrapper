@@ -67,9 +67,26 @@ export function mergeResults(results: ExtractorResult[]): Partial<import('../typ
       }
     }
 
-    if (r.subtitle && !merged.subtitulo) merged.subtitulo = r.subtitle;
+    if (r.subtitle && !merged.subtitulo) {
+      const isPressReaderCover = r.subtitle.trim().startsWith('PressReader.com') && window.location.hostname.includes('pressreader.com');
+      const isGeneric = r.subtitle.toLowerCase().includes('pressreader.com') && 
+                        (r.subtitle.toLowerCase().includes('periódicos') || r.subtitle.toLowerCase().includes('replicas') || r.subtitle.toLowerCase().includes('réplicas'));
+      if (!isGeneric && !isPressReaderCover) {
+        merged.subtitulo = r.subtitle;
+      }
+    }
     if (r.section && !merged.seccion) merged.seccion = r.section;
-    if (r.imageUrls?.length && !merged.imageUrls) merged.imageUrls = r.imageUrls;
+    if (r.imageUrls?.length && !merged.imageUrls) {
+      const filtered = r.imageUrls.filter((url) => {
+        if (!url) return false;
+        const lower = url.toLowerCase();
+        const isPressReaderCover = (lower.includes('prcdn.co') || lower.includes('pressreader.com')) && lower.includes('page=');
+        return !isPressReaderCover;
+      });
+      if (filtered.length > 0) {
+        merged.imageUrls = filtered;
+      }
+    }
     if (r.url && !merged.url) merged.url = r.url;
     if (r.paywallDetected) merged.paywallDetected = true;
   }

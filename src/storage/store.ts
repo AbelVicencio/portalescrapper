@@ -39,7 +39,6 @@ export async function getArticleById(id: string): Promise<NewsArticle | undefine
   }
 
 export async function updateBadge(count?: number): Promise<void> {
-  const total = count ?? (await getAllArticles()).length;
-  await chrome.action.setBadgeText({ text: total > 0 ? String(total) : '' });
-  await chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
+  // Siempre vacío para no mostrar el conteo de notas en el ícono externo de la extensión
+  await chrome.action.setBadgeText({ text: '' });
 }

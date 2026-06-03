@@ -1,4 +1,7 @@
+import type { GrabarMedialogPayload } from './types';
+
 const BASE_URL = 'https://api.medialog.com.mx/v1';
+
 
 export async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs: number = 15000): Promise<Response> {
   const controller = new AbortController();

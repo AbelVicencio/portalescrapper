@@ -2128,9 +2128,25 @@
           }
         }
       }
-      if (r.subtitle && !merged.subtitulo) merged.subtitulo = r.subtitle;
+      if (r.subtitle && !merged.subtitulo) {
+        const isPressReaderCover = r.subtitle.trim().startsWith("PressReader.com") && window.location.hostname.includes("pressreader.com");
+        const isGeneric = r.subtitle.toLowerCase().includes("pressreader.com") && (r.subtitle.toLowerCase().includes("peri\xF3dicos") || r.subtitle.toLowerCase().includes("replicas") || r.subtitle.toLowerCase().includes("r\xE9plicas"));
+        if (!isGeneric && !isPressReaderCover) {
+          merged.subtitulo = r.subtitle;
+        }
+      }
       if (r.section && !merged.seccion) merged.seccion = r.section;
-      if (r.imageUrls?.length && !merged.imageUrls) merged.imageUrls = r.imageUrls;
+      if (r.imageUrls?.length && !merged.imageUrls) {
+        const filtered = r.imageUrls.filter((url) => {
+          if (!url) return false;
+          const lower = url.toLowerCase();
+          const isPressReaderCover = (lower.includes("prcdn.co") || lower.includes("pressreader.com")) && lower.includes("page=");
+          return !isPressReaderCover;
+        });
+        if (filtered.length > 0) {
+          merged.imageUrls = filtered;
+        }
+      }
       if (r.url && !merged.url) merged.url = r.url;
       if (r.paywallDetected) merged.paywallDetected = true;
     }
@@ -2431,13 +2447,21 @@
         if (position & 2) return 1;
         return 0;
       });
-      return sortedNodes.map((n) => {
+      return sortedNodes.filter((n) => {
+        const el = n;
+        const isSummary = el.closest('[class*="QuickSummary" i], [class*="quick-summary" i], [data-testid*="quick-summary" i], [class*="KeyPoints" i], [class*="key-points" i], [class*="SummaryBullets" i], [class*="summary-bullets" i], [class*="AiSummary" i], [class*="ai-summary" i]');
+        return !isSummary;
+      }).map((n) => {
         const el = n;
         return (el.innerText || el.textContent || "").trim();
       }).filter(Boolean).join("\n\n");
     }
     const nodes = document.querySelectorAll(selector);
-    return Array.from(nodes).map((n) => {
+    return Array.from(nodes).filter((n) => {
+      const el = n;
+      const isSummary = el.closest('[class*="QuickSummary" i], [class*="quick-summary" i], [data-testid*="quick-summary" i], [class*="KeyPoints" i], [class*="key-points" i], [class*="SummaryBullets" i], [class*="summary-bullets" i], [class*="AiSummary" i], [class*="ai-summary" i]');
+      return !isSummary;
+    }).map((n) => {
       const el = n;
       return (el.innerText || el.textContent || "").trim();
     }).filter(Boolean).join("\n\n");
@@ -2525,9 +2549,21 @@
       return true;
     });
     if (filtered.length === 0) return "";
-    let startIndex = 0;
+    const processed = [];
     for (let i = 0; i < filtered.length; i++) {
       const p = filtered[i];
+      const isDuplicateSummaryBullet = i < 8 && p.length > 25 && filtered.slice(i + 1).some((other) => other === p);
+      if (i < 3 && (p.toLowerCase() === "and" || p.toLowerCase() === "a" || p.length < 5)) {
+        continue;
+      }
+      if (!isDuplicateSummaryBullet) {
+        processed.push(p);
+      }
+    }
+    if (processed.length === 0) return "";
+    let startIndex = 0;
+    for (let i = 0; i < processed.length; i++) {
+      const p = processed[i];
       if (p === "Listen" || p === "By" || p.match(/^\(\d+\s*min\)$/i)) {
         continue;
       }
@@ -2540,28 +2576,52 @@
       startIndex = i;
       break;
     }
-    let endIndex = filtered.length - 1;
-    for (let i = filtered.length - 1; i >= 0; i--) {
-      const p = filtered[i];
-      if (p.includes("Copyright \xA9") || p.includes("All Rights Reserved") || p.includes("Dow Jones & Company")) {
-        continue;
+    let endIndex = processed.length - 1;
+    for (let i = startIndex; i < processed.length; i++) {
+      const p = processed[i].toLowerCase();
+      if (p.includes("submitting your response") || p.includes("submitting your responses") || p.includes("consent to dow jones") || p.includes("dow jones processing") || p.includes("special categories of") || p.includes("questionnaire") || p.includes("write to ") || p.includes("contact ") && p.includes("@") || p.includes("appeared in the ") && p.includes("print edition") || p.includes("corrections & amplifications") || p.includes("copyright \xA9") || p.includes("all rights reserved") || p.includes("dow jones & company")) {
+        endIndex = i - 1;
+        break;
       }
-      if (p.match(/is a rewrite editor/i) || p.match(/is a reporter/i) || p.includes("rewrite editor at The Wall Street Journal")) {
-        continue;
+    }
+    if (endIndex === processed.length - 1) {
+      for (let i = processed.length - 1; i >= startIndex; i--) {
+        const p = processed[i];
+        if (p.includes("Copyright \xA9") || p.includes("All Rights Reserved") || p.includes("Dow Jones & Company")) {
+          continue;
+        }
+        if (p.match(/is a rewrite editor/i) || p.match(/is a reporter/i) || p.includes("rewrite editor at The Wall Street Journal")) {
+          continue;
+        }
+        if (p.toLowerCase().includes("write to ") || p.toLowerCase().includes("contact ") && p.includes("@")) {
+          continue;
+        }
+        if (p.includes("Appeared in the ") && p.includes("print edition")) {
+          continue;
+        }
+        if (p.toLowerCase().includes("contributed to this article")) {
+          continue;
+        }
+        if (p.includes("Corrections & Amplifications")) {
+          continue;
+        }
+        if (p.toLowerCase().includes("submitting your response") || p.toLowerCase().includes("consent to dow jones") || p.toLowerCase().includes("questionnaire")) {
+          continue;
+        }
+        if (p === "Autos" || p === "Climate and Energy Newsletter" || p === "Latin America News" || p === "Heard on the Street" || p === "Earnings" || p === "Whats News Newsletter" || p === "Videos" || p.includes("Most Popular") || p.includes("OPINION") || p.includes("Recommended Videos") || p.includes("Inside Israel\u2019s High-Tech") || p.includes("Quantum Computing") || p.includes("Opinion:")) {
+          continue;
+        }
+        if (p.length < 40) {
+          continue;
+        }
+        endIndex = i;
+        break;
       }
-      if (p === "Autos" || p === "Climate and Energy Newsletter" || p === "Latin America News" || p === "Heard on the Street" || p === "Earnings" || p === "Whats News Newsletter" || p === "Videos" || p.includes("Most Popular") || p.includes("OPINION") || p.includes("Recommended Videos") || p.includes("Inside Israel\u2019s High-Tech") || p.includes("Quantum Computing") || p.includes("Opinion:")) {
-        continue;
-      }
-      if (p.length < 40) {
-        continue;
-      }
-      endIndex = i;
-      break;
     }
     if (startIndex > endIndex) {
-      return filtered.join("\n\n");
+      return processed.join("\n\n");
     }
-    const sliced = filtered.slice(startIndex, endIndex + 1);
+    const sliced = processed.slice(startIndex, endIndex + 1);
     return sliced.filter((p) => {
       const lower = p.toLowerCase();
       if (lower === "quick summary") return false;
@@ -3096,6 +3156,9 @@
     const generic = extractGeneric();
     if (generic.confidence > 0) results.push(generic);
     const merged = mergeResults(results);
+    if (window.location.hostname.includes("wsj.com") && merged.texto) {
+      merged.texto = cleanWSJText(merged.texto);
+    }
     if (window.location.hostname.includes("milenio.com") && merged.texto) {
       const title = merged.superabstract || "";
       const author = merged.autor || "";
@@ -3159,6 +3222,14 @@
     }
   }
   async function getCleanSnapshotHTML(overrideData) {
+    let html2pdfUrl = "";
+    let snapshotHelperUrl = "";
+    try {
+      html2pdfUrl = chrome.runtime.getURL("dist/html2pdf.bundle.min.js");
+      snapshotHelperUrl = chrome.runtime.getURL("dist/snapshot-helper.js");
+    } catch (e) {
+      console.warn("[PortalScrapper] Could not resolve resources URL:", e);
+    }
     const doc = document.cloneNode(true);
     const hostname = window.location.hostname;
     const originalUrl = window.location.href;
@@ -3256,11 +3327,28 @@
       ".banner-container",
       ".sidebar-container"
     ];
+    const wsjSelectors = [
+      "form",
+      '[class*="insetComponents"]',
+      '[class*="Disclaimer"]',
+      '[id*="feedback"]',
+      '[class*="QuickSummary" i]',
+      '[class*="quick-summary" i]',
+      '[data-testid*="quick-summary" i]',
+      '[class*="KeyPoints" i]',
+      '[class*="key-points" i]',
+      '[class*="SummaryBullets" i]',
+      '[class*="summary-bullets" i]',
+      '[class*="AiSummary" i]',
+      '[class*="ai-summary" i]'
+    ];
     let selectorsToClean = [...generalNoiseSelectors];
     if (hostname.includes("elpais.com")) {
       selectorsToClean = [...selectorsToClean, ...elpaisSelectors];
     } else if (hostname.includes("milenio.com")) {
       selectorsToClean = [...selectorsToClean, ...milenioSelectors];
+    } else if (hostname.includes("wsj.com")) {
+      selectorsToClean = [...selectorsToClean, ...wsjSelectors];
     }
     for (const selector of selectorsToClean) {
       try {
@@ -3301,19 +3389,24 @@
       }
     });
     let heroImageSrc = "";
+    const isPressReaderCover = (url) => {
+      if (!url) return false;
+      const lower = url.toLowerCase();
+      return (lower.includes("prcdn.co") || lower.includes("pressreader.com")) && lower.includes("page=");
+    };
     const ogImg = doc.querySelector('meta[property="og:image"]')?.getAttribute("content");
-    if (ogImg) {
+    if (ogImg && !isPressReaderCover(ogImg)) {
       heroImageSrc = ogImg;
     } else {
       const twitterImg = doc.querySelector('meta[name="twitter:image"]')?.getAttribute("content");
-      if (twitterImg) {
+      if (twitterImg && !isPressReaderCover(twitterImg)) {
         heroImageSrc = twitterImg;
       } else {
         const images = Array.from(doc.querySelectorAll("article img, main img, img"));
         let maxArea = 0;
         for (const img of images) {
           const src = img.getAttribute("src");
-          if (!src || src.startsWith("data:")) continue;
+          if (!src || src.startsWith("data:") || isPressReaderCover(src)) continue;
           const width = parseInt(img.getAttribute("width") || "0", 10);
           const height = parseInt(img.getAttribute("height") || "0", 10);
           const area = width * height;
@@ -3325,7 +3418,7 @@
         if (!heroImageSrc) {
           for (const img of images) {
             const src = img.getAttribute("src");
-            if (src && !src.startsWith("data:") && !/icon|logo|avatar|social/i.test(src)) {
+            if (src && !src.startsWith("data:") && !/icon|logo|avatar|social/i.test(src) && !isPressReaderCover(src)) {
               heroImageSrc = src;
               break;
             }
@@ -3362,7 +3455,13 @@
     if (!pageDate) {
       pageDate = doc.querySelector('meta[property="article:published_time"]')?.getAttribute("content") || doc.querySelector("time[datetime]")?.getAttribute("datetime") || doc.querySelector("time")?.textContent?.trim() || "";
     }
-    const pageSubtitle = doc.querySelector('meta[name="description"]')?.getAttribute("content") || doc.querySelector('meta[property="og:description"]')?.getAttribute("content") || doc.querySelector(".article-lead")?.textContent?.trim() || doc.querySelector(".article-subtitle")?.textContent?.trim() || "";
+    let pageSubtitle = doc.querySelector('meta[name="description"]')?.getAttribute("content") || doc.querySelector('meta[property="og:description"]')?.getAttribute("content") || doc.querySelector(".article-lead")?.textContent?.trim() || doc.querySelector(".article-subtitle")?.textContent?.trim() || "";
+    if (pageSubtitle) {
+      const isGeneric = pageSubtitle.toLowerCase().includes("pressreader.com") && (pageSubtitle.toLowerCase().includes("peri\xF3dicos") || pageSubtitle.toLowerCase().includes("replicas") || pageSubtitle.toLowerCase().includes("r\xE9plicas"));
+      if (isGeneric) {
+        pageSubtitle = "";
+      }
+    }
     let pageKicker = doc.querySelector(".article-kicker")?.textContent?.trim() || "";
     if (!pageKicker) {
       const kickerFallback = doc.querySelector('[class*="kicker" i]')?.textContent?.trim() || "";
@@ -3460,7 +3559,7 @@
     }
     if (heroImageSrc) {
       try {
-        const bodyDoc = new DOMParser().parseFromString(parsedArticle.content, "text/html");
+        const bodyDoc = new DOMParser().parseFromString(parsedArticle.content || "", "text/html");
         const heroUrlClean = heroImageSrc.split("?")[0].split("#")[0];
         const bodyImages = Array.from(bodyDoc.querySelectorAll("img, picture"));
         let removedAny = false;
@@ -3504,6 +3603,9 @@
     }
     let sourceName = parsedArticle.siteName || hostname.replace("www.", "");
     let subtitleVal = parsedArticle.excerpt || pageSubtitle;
+    if (subtitleVal && hostname.includes("pressreader.com") && subtitleVal.trim().startsWith("PressReader.com")) {
+      subtitleVal = "";
+    }
     let kickerVal = pageKicker;
     let rawDate = pageDate;
     if (overrideData) {
@@ -3921,10 +4023,6 @@
     const resolvedBodyFont = siteConfig?.bodyFontFamily || "'Lora', Georgia, serif";
     const resolvedTitleFont = siteConfig?.titleFontFamily || "'Playfair Display', 'Times New Roman', serif";
     const cleanSubtitle = (subtitleVal || "").replace(/"/g, "&quot;").replace(/[\r\n]+/g, " ").trim();
-    const jsonLdAuthor = (authorVal || "").replace(/"/g, '\\"').trim() || "Redacci\xF3n";
-    const jsonLdTitle = title.replace(/"/g, '\\"');
-    const jsonLdPublisher = sourceName.replace(/"/g, '\\"');
-    const jsonLdImage = heroImageSrc ? `"${heroImageSrc}"` : "[]";
     const finalHtml = `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -3950,24 +4048,9 @@
   <!-- Premium color accent for link preview sidebars (Telegram, Discord, Slack) -->
   <meta name="theme-color" content="${themeColor}">
 
-  <!-- Schema.org Structured Metadata for Crawlers & Previews -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "NewsArticle",
-    "headline": "${jsonLdTitle}",
-    "image": ${jsonLdImage.startsWith('"') ? `[${jsonLdImage}]` : "[]"},
-    "datePublished": "${pageDate || (/* @__PURE__ */ new Date()).toISOString()}",
-    "author": [{
-      "@type": "Person",
-      "name": "${jsonLdAuthor}"
-    }],
-    "publisher": {
-      "@type": "Organization",
-      "name": "${jsonLdPublisher}"
-    }
-  }
-  <\/script>
+  ${html2pdfUrl ? `<script src="${html2pdfUrl}"><\/script>` : ""}
+  ${snapshotHelperUrl ? `<script src="${snapshotHelperUrl}"><\/script>` : ""}
+
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -3999,6 +4082,43 @@
       margin: 0;
       padding: 0;
       -webkit-font-smoothing: antialiased;
+    }
+
+    /* Local Alert Banner */
+    .local-alert {
+      position: fixed;
+      top: 80px;
+      right: 24px;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      z-index: 2000;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      opacity: 0;
+      transform: translateY(-20px);
+      pointer-events: none;
+    }
+    .local-alert.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .local-alert.success {
+      background-color: #f0fdf4;
+      color: #166534;
+      border: 1px solid #bbf7d0;
+    }
+    .local-alert.warning {
+      background-color: #fffbeb;
+      color: #92400e;
+      border: 1px solid #fef3c7;
+    }
+    .local-alert.error {
+      background-color: #fef2f2;
+      color: #991b1b;
+      border: 1px solid #fca5a5;
     }
 
     /* Floating Action Bar */
@@ -4171,9 +4291,51 @@
 
     /* Content Container */
     .container {
-      max-width: 740px;
-      margin: 40px auto;
-      padding: 0 24px;
+      width: 95%;
+      max-width: 1000px;
+      margin: 30px auto;
+      padding: 0 20px;
+      box-sizing: border-box;
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        width: 100%;
+        margin: 10px auto;
+        padding: 0 12px;
+      }
+      .portal-top-bar {
+        padding: 10px 14px;
+        min-height: 48px;
+      }
+      .brand-text-logo {
+        font-size: 20px !important;
+      }
+      .extracted-svg-logo {
+        max-height: 24px !important;
+      }
+      .extracted-img-logo {
+        max-height: 28px !important;
+      }
+      .article-title {
+        font-size: 22px !important;
+        line-height: 1.3 !important;
+        margin-bottom: 12px !important;
+      }
+      .article-subtitle {
+        font-size: 14px !important;
+        line-height: 1.45 !important;
+        margin-bottom: 14px !important;
+      }
+      #readability-page-1 {
+        font-size: 15px !important;
+        line-height: 1.6 !important;
+      }
+      p {
+        font-size: 15px !important;
+        line-height: 1.6 !important;
+        margin-bottom: 14px !important;
+      }
     }
 
     /* Header styling */
@@ -4317,7 +4479,8 @@
 
     /* Hero Image */
     .hero-container {
-      max-width: 600px;
+      width: 100%;
+      max-width: 800px;
       margin: 0 auto 36px auto;
       border-radius: 8px;
       overflow: hidden;
@@ -4448,7 +4611,7 @@
     }
   </style>
 </head>
-<body>
+<body data-medialog-id="${overrideData?.medialogId || ""}" data-superabstract="${(overrideData?.superabstract || "").replace(/"/g, "&quot;")}" data-api-token="${overrideData?.token || ""}">
   <div class="action-bar">
     <div class="brand">
       <span>\u{1F4F0} PortalScrapper Snapshot</span>
@@ -4456,6 +4619,7 @@
     <div class="buttons">
       <button class="btn" id="btn-snapshot-close">\u274C Cerrar</button>
       <button class="btn" id="btn-snapshot-save">\u{1F4BE} Guardar HTML</button>
+      <button class="btn" id="btn-snapshot-upload" style="background-color: #0284c7; border-color: #0284c7; color: white;">\u{1F4E4} Guardar PDF</button>
       <button class="btn btn-primary" id="btn-snapshot-print">\u{1F5A8}\uFE0F Imprimir</button>
     </div>
   </div>
@@ -4489,7 +4653,7 @@
       </div>
 
       <div class="original-url-footer">
-        Documento generado por PortalScrapper.<br>
+        Documento generado por Medialog.<br>
         Nota original: <a href="${originalUrl}" target="_blank">${originalUrl}</a>
       </div>
     </div>
@@ -4532,14 +4696,43 @@
     }
     return null;
   }
+  function getBaseDomain(hostname) {
+    let domain = hostname.replace(/^www\./, "");
+    const parts = domain.split(".");
+    if (parts.length <= 2) {
+      return domain;
+    }
+    const secondLevelTlds = ["com", "org", "net", "edu", "gob", "mil", "co", "ac", "info"];
+    const secondToLast = parts[parts.length - 2];
+    if (secondLevelTlds.includes(secondToLast)) {
+      return parts.slice(-3).join(".");
+    }
+    return parts.slice(-2).join(".");
+  }
+  function isAmpOrCache(hostname) {
+    const h = hostname.toLowerCase();
+    return h.startsWith("amp.") || h.includes(".amp.") || h.includes("ampproject") || h.includes("googleusercontent") || h.includes("webcache") || h.includes("archive.org") || h === "google.com" || h.endsWith(".google.com") || h === "google.com.mx" || h.endsWith(".google.com.mx");
+  }
   function getCleanUrl() {
+    const currentHost = window.location.hostname;
+    const currentBase = getBaseDomain(currentHost);
+    const isCurrentAmp = isAmpOrCache(currentHost);
+    const isValidCanonical = (urlStr) => {
+      try {
+        const targetUrl = new URL(urlStr);
+        const targetBase = getBaseDomain(targetUrl.hostname);
+        return isCurrentAmp || currentBase === targetBase;
+      } catch {
+        return false;
+      }
+    };
     try {
       const canonicalEl = document.querySelector('link[rel="canonical"]');
       if (canonicalEl) {
         const href = canonicalEl.getAttribute("href");
         if (href) {
           const absoluteUrl = new URL(href, window.location.href).href;
-          if (absoluteUrl.startsWith("http://") || absoluteUrl.startsWith("https://")) {
+          if ((absoluteUrl.startsWith("http://") || absoluteUrl.startsWith("https://")) && isValidCanonical(absoluteUrl)) {
             return absoluteUrl;
           }
         }
@@ -4553,7 +4746,7 @@
         const content = ogUrlEl.getAttribute("content");
         if (content) {
           const absoluteUrl = new URL(content, window.location.href).href;
-          if (absoluteUrl.startsWith("http://") || absoluteUrl.startsWith("https://")) {
+          if ((absoluteUrl.startsWith("http://") || absoluteUrl.startsWith("https://")) && isValidCanonical(absoluteUrl)) {
             return absoluteUrl;
           }
         }

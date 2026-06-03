@@ -14,7 +14,7 @@
     <!-- LOGIN SCREEN -->
     <div id="login-screen">
       <header>
-        <h1>📰 PortalScrapper <span id="login-version">v1.0.207</span></h1>
+        <h1>📰 PortalScrapper <span id="login-version">v1.0.235</span></h1>
       </header>
       <div class="login-box">
         <h3>Iniciar Sesión — API Medialog</h3>
@@ -62,8 +62,7 @@
             <strong id="detected-site">—</strong>
             <span id="detected-meta" style="font-size:11px; color:#888; margin-left:6px;">Esperando página...</span>
           </div>
-          <div id="portal-header"
-            style="display:none; background:#1c1c30; padding:4px 8px; border-radius:4px; font-weight:600; white-space:nowrap;">
+          <div id="portal-header" style="display:none;">
             <span id="portal-name"></span>
             <span id="portal-country" style="font-size:11px; color:#888; margin-left:4px;"></span>
           </div>
@@ -74,13 +73,13 @@
       <div class="field">
         <div class="label">Superabstract (Encabezado) <button class="copy-btn" data-target="superabstract">📋</button>
         </div>
-        <textarea id="superabstract" rows="2" placeholder="Título de la nota"></textarea>
+        <textarea id="superabstract" rows="2" placeholder="Título de la nota" spellcheck="false"></textarea>
       </div>
 
       <div class="field">
         <div class="label">Abstract (URL de la nota) <button class="copy-btn" data-target="url">📋</button><button
             id="btn-open-url" class="copy-btn" title="Abrir en nueva pestaña">🔗</button></div>
-        <input id="url" placeholder="https://...">
+        <input id="url" placeholder="https://..." spellcheck="false">
       </div>
       <div class="compact-grid">
         <div>
@@ -109,18 +108,18 @@
         </div>
         <div>
           <div class="label">Medio</div>
-          <input id="medio" placeholder="Portal">
+          <input id="medio" placeholder="Portal" spellcheck="false">
         </div>
         <div>
           <div class="label">Autor</div>
-          <input id="autor" placeholder="Autor">
+          <input id="autor" placeholder="Autor" spellcheck="false">
         </div>
 
       </div>
 
       <div class="field">
         <div class="label">Texto / Transcripción <button class="copy-btn" data-target="texto">📋</button></div>
-        <textarea id="texto" placeholder="Contenido completo del artículo..."></textarea>
+        <textarea id="texto" placeholder="Contenido completo del artículo..." spellcheck="false"></textarea>
       </div>
 
       <!-- History panel -->
@@ -131,12 +130,12 @@
       <div class="actions" style="margin-top:8px;">
         <button id="btn-export-json" class="secondary">📤 JSON</button>
         <button id="btn-export-csv" class="secondary">📤 CSV</button>
-        <button id="btn-clear-all" class="secondary" style="margin-left:auto; background:#3b0b0b;">🗑️ Limpiar</button>
+        <button id="btn-clear-all" class="secondary" style="margin-left:auto;">🗑️ Limpiar</button>
       </div>
 
       <!-- Botón especial para forzar pruebas de chequeo por API (limpia TODO storage) -->
       <button id="btn-clear-storage" class="secondary"
-        style="width:100%; margin-top:6px; background:#4a1f1f; font-size:11px;">
+        style="width:100%; margin-top:6px; font-size:11px;">
         🗑️ Borrar storage local completo (forzar pruebas API)
       </button>
     </div>

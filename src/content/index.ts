@@ -44,7 +44,51 @@ function detectSite(): { site: string; name: string } | null {
   return null;
 }
 
+function getBaseDomain(hostname: string): string {
+  let domain = hostname.replace(/^www\./, '');
+  const parts = domain.split('.');
+  if (parts.length <= 2) {
+    return domain;
+  }
+  const secondLevelTlds = ['com', 'org', 'net', 'edu', 'gob', 'mil', 'co', 'ac', 'info'];
+  const secondToLast = parts[parts.length - 2];
+  if (secondLevelTlds.includes(secondToLast)) {
+    return parts.slice(-3).join('.');
+  }
+  return parts.slice(-2).join('.');
+}
+
+function isAmpOrCache(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return (
+    h.startsWith('amp.') ||
+    h.includes('.amp.') ||
+    h.includes('ampproject') ||
+    h.includes('googleusercontent') ||
+    h.includes('webcache') ||
+    h.includes('archive.org') ||
+    h === 'google.com' ||
+    h.endsWith('.google.com') ||
+    h === 'google.com.mx' ||
+    h.endsWith('.google.com.mx')
+  );
+}
+
 function getCleanUrl(): string {
+  const currentHost = window.location.hostname;
+  const currentBase = getBaseDomain(currentHost);
+  const isCurrentAmp = isAmpOrCache(currentHost);
+
+  const isValidCanonical = (urlStr: string): boolean => {
+    try {
+      const targetUrl = new URL(urlStr);
+      const targetBase = getBaseDomain(targetUrl.hostname);
+      return isCurrentAmp || currentBase === targetBase;
+    } catch {
+      return false;
+    }
+  };
+
   // 1. Try canonical link
   try {
     const canonicalEl = document.querySelector('link[rel="canonical"]');
@@ -52,7 +96,10 @@ function getCleanUrl(): string {
       const href = canonicalEl.getAttribute('href');
       if (href) {
         const absoluteUrl = new URL(href, window.location.href).href;
-        if (absoluteUrl.startsWith('http://') || absoluteUrl.startsWith('https://')) {
+        if (
+          (absoluteUrl.startsWith('http://') || absoluteUrl.startsWith('https://')) &&
+          isValidCanonical(absoluteUrl)
+        ) {
           return absoluteUrl;
         }
       }
@@ -68,7 +115,10 @@ function getCleanUrl(): string {
       const content = ogUrlEl.getAttribute('content');
       if (content) {
         const absoluteUrl = new URL(content, window.location.href).href;
-        if (absoluteUrl.startsWith('http://') || absoluteUrl.startsWith('https://')) {
+        if (
+          (absoluteUrl.startsWith('http://') || absoluteUrl.startsWith('https://')) &&
+          isValidCanonical(absoluteUrl)
+        ) {
           return absoluteUrl;
         }
       }

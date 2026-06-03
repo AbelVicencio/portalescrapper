@@ -360,3 +360,58 @@ textarea {
   margin-right: 4px;
   margin-bottom: 4px;
 }
+
+/* Portal header styles for dark/light themes */
+#portal-header {
+  background: #1c1c30;
+  color: #e5e7eb;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+body.light #portal-header {
+  background: #e5e7eb;
+  color: #1f2937;
+}
+
+/* History block light overrides */
+body.light .history {
+  border-top: 1px solid #e5e7eb;
+}
+
+body.light .history-item {
+  background: #e5e7eb;
+  color: #1f2937;
+}
+
+body.light .history-item:hover {
+  background: #d1d5db;
+}
+
+body.light .badge {
+  background: #d1d5db;
+  color: #1f2937;
+}
+
+/* Clear buttons theme overrides */
+#btn-clear-all, #btn-clear-storage {
+  background: #3b0b0b;
+  color: #fca5a5;
+  border: 1px solid #7f1d1d;
+}
+
+#btn-clear-all:hover, #btn-clear-storage:hover {
+  background: #4a1212;
+}
+
+body.light #btn-clear-all, body.light #btn-clear-storage {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+body.light #btn-clear-all:hover, body.light #btn-clear-storage:hover {
+  background: #fecaca;
+}

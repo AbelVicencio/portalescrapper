@@ -1,7 +1,7 @@
 import { ExtractorResult, mergeResults, createEmptyResult } from './base';
 import { extractJsonLd } from './jsonld';
 import { extractMetaTags } from './meta';
-import { extractSiteSpecific, cleanMilenioText, cleanElUniversalText, cleanElPaisText } from './siteSpecific';
+import { extractSiteSpecific, cleanMilenioText, cleanElUniversalText, cleanElPaisText, cleanWSJText } from './siteSpecific';
 import { extractGeneric } from './generic';
 
 /**
@@ -40,6 +40,9 @@ export function runExtractionCascade(): { result: Partial<import('../types').New
   const merged = mergeResults(results);
 
   // Post-procesamiento específico por portal en el texto final
+  if (window.location.hostname.includes('wsj.com') && merged.texto) {
+    merged.texto = cleanWSJText(merged.texto);
+  }
   if (window.location.hostname.includes('milenio.com') && merged.texto) {
     const title = merged.superabstract || '';
     const author = merged.autor || '';
