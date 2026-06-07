@@ -1,4 +1,4 @@
-# 🚀 API Medialog v2.2.0
+# 🚀 API Medialog v2.2.1
 ### *La Inteligencia Aplicada al Monitoreo de Medios de Comunicación*
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
@@ -10,13 +10,13 @@
 
 ## 📋 Descripción General
 
-**API Medialog v2.2.0** es una plataforma profesional de alto rendimiento rediseñada bajo principios de **Clean Architecture** y **SOLID**. Está optimizada para la gestión, consulta y análisis inteligente de contenidos de monitoreo en Radio, Televisión y Prensa.
+**API Medialog v2.2.1** es una plataforma profesional de alto rendimiento rediseñada bajo principios de **Clean Architecture** y **SOLID**. Está optimizada para la gestión, consulta y análisis inteligente de contenidos de monitoreo en Radio, Televisión y Prensa.
 
 Esta versión implementa orquestación avanzada de servicios, inyección de dependencias y un motor de visualización basado en IA de última generación.
 
 ---
 
-## ✨ Características Principales (v2.2.0)
+## ✨ Características Principales (v2.2.1)
 
 ### 🔄 Estándares y Orquestación
 *   **Versionado Explícito**: Continuidad del prefijo `/v1/` para estabilidad de contratos.
@@ -85,11 +85,21 @@ python main.py --environment production --workers 6 --loglevel INFO
 | **Documentación** | `/docs` | Interfaz **Scalar** interactiva profesional. |
 | **Salud** | `/v1/health` | Estado detallado de API, BD y versión. |
 | **Prensa** | `/v1/prensa/` | Notas con autocultivo de abstracts IA. |
-| **Radio/TV** | `/v1/medialogs/hash/{id}` | Enlaces y metadatos de monitoreo electrónico. |
-| **Radio/TV (Captura)** | `/v1/medialogs/` | Capturar registro de monitoreo electrónico (emisora, emisión, fecha, evento…). |
+| **Radio/TV (Listado)** | `/v1/medialogs/` | Listado y búsqueda de monitoreo electrónico (Radio/TV). |
+| **Radio/TV (Hash)** | `/v1/medialogs/hash/{id}` | Obtener hash MD5 y metadatos de acceso de un Medialog. |
+| **Radio/TV (Captura)** | `POST /v1/medialogs/` | Capturar registro de monitoreo electrónico (emisora, emisión, fecha, evento…). |
+| **Radio/TV (Actualizar)** | `PATCH /v1/medialogs/{id}` | Actualizar campos de un Medialog existente. |
 | **Análisis Nucleado** | `/v1/{modulo}/.../nucleado` | Síntesis narrativa agrupada con refinamiento vía `precisiones`. |
+| **Transcripciones** | `/v1/transcripciones/` | Consulta y búsqueda de transcripciones Speech-to-Text. |
 | **Portales** | `/v1/portales/` | Captura y listado paginado de portales web con filtros de dominio y nombre. |
 | **Relaciones** | `/v1/relaciones/medialogs` | Vinculaciones entre Medialogs y Clasificaciones con paginación y ordenamiento. |
+| **Clasificaciones** | `/v1/clasificaciones/` | Rankings y detalle de actores, instituciones, temas y más. |
+| **Mediarchivos** | `POST /v1/mediarchivos/cargapdf` | Carga y valida un PDF asociado a un Medialog (máx. 10.5 MB). |
+| **Mediarchivos** | `POST /v1/mediarchivos/cargar` | Carga un archivo de cualquier extensión en carpeta configurada por función. |
+| **Catálogos** | `/v1/catalogos/` | Catálogos de eventos, tipos de prensa, prompts IA, emisoras, clientes y usuarios. |
+| **Prompts IA** | `/v1/catalogos/prompts` | Catálogo de prompts de análisis IA con filtros por ID, Tipo y Variante. |
+| **Emisiones** | `/v1/emisiones/` | Parrilla de programación y detalle de emisiones. |
+| **Síntesis** | `POST /v1/sintesis/generar` | Generador orquestado de reportes ejecutivos (HTML/DOCX). |
 
 ---
 
@@ -99,9 +109,11 @@ Para profundizar en el desarrollo y uso de la API, consulte los siguientes docum
 
 *   🛠️ **[CONFIGURACION.md](./CONFIGURACION.md)**: Parámetros y variables de entorno.
 *   🤖 **[AGENTS.md](./AGENTS.md)**: Guía de estándares para IAs y desarrolladores.
-*   📘 **[GUIA_API_V2.md](./GUIA_API_V2.md)**: Guía integral de capacidades v2.2.0.
-*   📘 **[ApiMedialog.txt](./ApiMedialog.txt)**: Referencia técnica compacta.
+*   📘 **[GUIA_API_V2.md](./GUIA_API_V2.md)**: Guía integral de capacidades v2.2.1.
+*   📘 **[ApiMedialog.txt](./ApiMedialog.txt)**: Referencia técnica compacta (zero-shot).
+*   🏗️ **[ESTRUCTURA.md](./ESTRUCTURA.md)**: Detalle de Clean Architecture y flujo de datos.
+*   📊 **[metricas.md](./metricas.md)**: **Fuente única de verdad** para todas las métricas de análisis IA (`sentimiento`, `relevancia`, `cobertura`, `agresividad`, `riesgo`, `viralidad`, `objetividad`, `tópico`). Lectura **obligatoria** antes de diseñar o modificar cualquier prompt de análisis.
 
 ---
 
-**© 2026 Medialog MX** - *Líderes en Inteligencia de Medios*
+**© 2026 Medialog MX** - *Líderes en Inteligencia de Medios* | **v2.2.1**

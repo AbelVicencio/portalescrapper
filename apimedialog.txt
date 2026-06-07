@@ -43,6 +43,7 @@ GET /medialogs/clasificacion/{id}/analisis | Medialogs con IA | Params: sentimie
 GET /medialogs/clasificacion/{id}/analisis/nucleado | Análisis narrativo IA de Radio/TV | Params: precisiones:str?, refresh:bool?, +BaseFilters
 GET /medialogs/clasificacion/{id}/analisis/grafica | Visualizaciones: sismografo, crestas, calor, dashboard | Params: tipo:str, formato:svg|png|json, +BaseFilters
 POST /medialogs/ | Capturar registro de monitoreo electrónico | Body: {emisora:int, emision:int, fecha:ISO, usuario:str(20), evento:int, superabstract:str(200), logger?:smallint, transcriptor?:smallint, usuario_t?:str(20), fecha_log?:datetime, fecha_transcripcion?:datetime, abstract?:text, transcripcion?:text, analisis?:text, impacto?:smallint, pendiente?:smallint, duracion?:str(HH:MM:SS)} | Returns: {medialog:int, ...}
+PATCH /medialogs/{medialog} | Actualizar campos de un Medialog existente (parcial) | Body: {abstract?:text, transcripcion?:text, analisis?:text, impacto?:smallint, pendiente?:smallint, duracion?:str, logger?:smallint, usuario_t?:str(20)} | Returns: {medialog:int, ...}
 
 // ==================== ENDPOINTS: RELACIONES (Vinculaciones Medialog ↔ Clasificación) ====================
 GET /relaciones/medialogs | Listado paginado de vinculaciones (filtro obligatorio por volumen) | Params: medialog:str? (CSV), clasificacion:int?, fecha_inicio:str?, fecha_fin:str?, pagina:int, tamano_pagina:int, orden:str?
@@ -51,6 +52,14 @@ POST /relaciones/medialogs | Crear relación atómica (Medialog + Clasificación
 // ==================== ENDPOINTS: PORTALES (Portales Informativos Web) ====================
 GET /portales/ | Listado paginado de portales informativos web | Params: portal:str? (CSV), dominio:str? (LIKE), nombre_portal:str? (LIKE), emisora:int?, pagina:int, tamano_pagina:int, orden:str
 POST /portales/ | Captura atómica de portal informativo | Body: {dominio:str, alcance:str(3), pais:str, estado:str, municipio:str, medio_relacionado:str, puntos_medio:float, tiraje:int, emisora:int, nombre_portal?:str, id_emisora_relacionada?:int, id_medio_relacionado?:int, es_periodico?:int} | Returns: {portal:int, dominio:str, ...}
+
+// ==================== ENDPOINTS: CLASIFICACIONES (Actores, Instituciones, Temas, etc.) ====================
+GET /clasificaciones/buscar | Buscar clasificaciones por término en campos de descripción | Params: termino:str (obligatorio)
+GET /clasificaciones/{clasificacion_id} | Detalle de una clasificación específica | Params: clasificacion_id:int
+GET /clasificaciones/relevantes/{tipo}/menciones | Rankings por tipo con más menciones (paginado) | Params: tipo:actor|institucion|caso|tema|demarcacion, fecha_inicio:str?, fecha_fin:str?, emisora:int?, pagina:int, tamano_pagina:int, fields:str?
+GET /clasificaciones/relevantes/{tipo}/menciones/grafica.{formato} | Gráfico PNG/SVG de ranking por menciones | Params: tipo, formato:png|svg, fecha_inicio?, fecha_fin?, emisora?, tamano_pagina:int, refresh:bool
+GET /clasificaciones/relevantes/{tipo}/medialogs | Rankings por tipo con más medialogs (paginado) | Params: tipo:actor|institucion|caso|tema|demarcacion, fecha_inicio:str?, fecha_fin:str?, emisora:int?, pagina:int, tamano_pagina:int, fields:str?
+GET /clasificaciones/relevantes/{tipo}/medialogs/grafica.{formato} | Gráfico PNG/SVG de ranking por medialogs | Params: tipo, formato:png|svg, fecha_inicio?, fecha_fin?, emisora?, tamano_pagina:int, refresh:bool
 
 // ==================== ENDPOINTS: TRANSCRIPCIONES (Speech-to-Text) ====================
 GET /transcripciones/ | Listado general paginado (Optimizado sub-segundo) | Params: emisora:str? (CSV), tipo:str? (CSV), +BaseFilters
@@ -62,10 +71,21 @@ GET /transcripciones/clasificacion/{id}/analisis/nucleado | Síntesis de mencion
 GET /transcripciones/clasificacion/{id}/analisis/grafica | Joyplot/Heatmap de menciones | Params: tipo:str, formato:svg|png|json, +BaseFilters
 
 // ==================== ENDPOINTS: CATALOGOS, EMISORAS Y MEDIOS ====================
+GET /catalogos/eventos | Catálogo de tipos de evento/nota de Radio y TV | Params: fields:str?, clase:str? (Opinión|Informativo|Comercial)
+GET /catalogos/tiposnotasprensa | Tipos de nota y factores de relevancia | Params: fields:str?, clase:str?, relevancia_minima:int?
+GET /catalogos/tiposseccionesprensa | Catálogo de secciones para prensa escrita | Params: fields:str?
+GET /catalogos/prensaespacios | Espacios y autores de prensa con clasificaciones | Params: fields:str?
+GET /catalogos/Emisoras | Catálogo de emisoras (listado, por ID o por nombre) | Params: id:int?, nombre:str?, fields:str?
+GET /catalogos/Clientes | Catálogo de clientes (listado, por ID o por nombre) | Params: id:int?, nombre:str?, fields:str?
+GET /catalogos/Usuarios | Catálogo de usuarios (listado, por login o por nombre) | Params: id:str?, nombre:str?, fields:str?
+GET /catalogos/funciones | Catálogo Maestro de Funciones (CatFunciones) | Sin parámetros
+GET /catalogos/funciones/{usuario} | Todas las funciones configuradas para un usuario/cliente | Params: usuario:str
+GET /catalogos/funciones/{usuario}/{funcion_name} | Valor de una función específica del usuario | Params: usuario:str, funcion_name:str
+GET /catalogos/prioridad/{usuario} | Jerarquía de temas (Prioridad Temática) del usuario/cliente | Params: usuario:str, secc_min:int?, secc_max:int?
+GET /catalogos/prompts | Catálogo de prompts de análisis IA | Params: id:int?, tipo:str?, variante:str?
 GET /emisoras/activas | Directorio de emisoras operativas | Params: +BaseFilters
 GET /emisoras/{id} | Detalle de emisora (frecuencia, banda, logotipo) | Params: +BaseFilters
 GET /medios/{tipo} | Medios impresos por categoría (Nacional, Local) | Params: +BaseFilters
-GET /catalogos/tiposnotasprensa | Tipos de nota y factores de relevancia | Params: +BaseFilters
 
 // ==================== ENDPOINTS: EMISIONES (Programas) ====================
 GET /emisiones/dia/{fecha} | Parrilla de programación por día | Params: fecha:str, emisora_id:int?, +BaseFilters
@@ -73,6 +93,12 @@ GET /emisiones/dia/{fecha} | Parrilla de programación por día | Params: fecha:
 // ==================== ENDPOINTS: SÍNTESIS Y REPORTES ====================
 POST /sintesis/generar | Generador orquestado de reportes (HTML/DOCX) | Params: Body:{plantilla:JSON, formato:str}
 PUT /reportes/exclusiones/{tipo} | Gestionar exclusiones de monitoreo | Params: tipo:str, Body:JSON
+
+// ==================== ENDPOINTS: MEDIARCHIVOS (Carga de Archivos) ====================
+// Autenticación: JWT Bearer o X-API-Key obligatorio.
+// Content-Type: multipart/form-data
+POST /mediarchivos/cargapdf | Cargar archivo PDF asociado a un Medialog | Form: archivo:UploadFile (PDF, máx. 10.5 MB), medialog:int | Validates: magic bytes %PDF, extensión .pdf, tamaño, Directory Traversal | Returns(201): {ruta_guardada:str, nombre_guardado:str, medialog:int, tamano_bytes:int}
+POST /mediarchivos/cargar | Cargar archivo de cualquier extensión en carpeta configurada por función | Form: archivo:UploadFile (cualquier ext., máx. 10.5 MB) | Query: funcion:str (obligatorio, key en [Api_Mediarchivos_carpetas]), fecha?:YYYY-MM-DD (sustituye {FECHA_TRABAJO} en la ruta) | Validates: tamaño, no-vacío, nombre sin Path Traversal, función existente en BD | Returns(201): {ruta_guardada:str, carpeta_resuelta:str, nombre_guardado:str, tamano_bytes:int} | Errors: 400 (validación), 404 (función no encontrada)
 
 // ==================== ENDPOINTS: SISTEMA ====================
 GET /health | Estatus de salud (API, DB, Version) | Returns: {status: success, data: {version: 2.2.1}}

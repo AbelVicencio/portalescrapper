@@ -476,3 +476,31 @@ export async function healthCheck(): Promise<boolean> {
     return json?.data?.[0]?.hash || json?.hash || null;
   }
 
+  /**
+   * Sube un archivo PDF al servidor de Medialog consumiendo el endpoint /v1/mediarchivos/cargapdf
+   * @param medialogId Identificador numérico del Medialog
+   * @param pdfBlob Objeto Blob con el contenido del PDF generado
+   */
+  export async function cargarPDF(medialogId: number, pdfBlob: Blob): Promise<boolean> {
+    const formData = new FormData();
+    formData.append('archivo', pdfBlob, `${medialogId}.pdf`);
+    formData.append('medialog', String(medialogId));
+
+    const url = `${BASE_URL}/mediarchivos/cargapdf`;
+
+    const res = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: {
+        'X-API-Key': 'ak_live_accesoapi_h3CvobFBGaJfVgKh1uJxSqtGz8H3u2r5Sk3KPRcayek'
+      },
+      body: formData
+    }, 45000); // 45 seconds timeout for PDF upload
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new APIMedialogError(res.status, body || 'Error al subir el archivo PDF');
+    }
+    return true;
+  }
+
+

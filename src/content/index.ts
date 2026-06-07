@@ -22,7 +22,7 @@ function detectSite(): { site: string; name: string } | null {
     'elpais.com': 'El País',
     'reforma.com': 'Reforma',
     'milenio.com': 'Milenio',
-    'eluniversal.com.mx': 'El Universal',
+    'eluniversal.com': 'El Universal',
   };
   for (const [key, val] of Object.entries(known)) {
     if (host.includes(key)) return { site: key, name: val };
@@ -262,11 +262,16 @@ function setupMessageListener(): void {
     } else if (msg.type === 'GET_CLEAN_SNAPSHOT') {
       getCleanSnapshotHTML(msg.payload)
         .then((result) => {
-          sendResponse(result);
+          // Añadir el medialogId al resultado para que esté disponible en la ventana del snapshot
+          const enhancedResult = {
+            ...result,
+            medialogId: msg.payload.medialogId
+          };
+          sendResponse({ ok: true, payload: enhancedResult });
         })
         .catch((err) => {
           console.error('[PortalScrapper] Error generating clean snapshot:', err);
-          sendResponse({ error: err.message || String(err) });
+          sendResponse({ ok: false, error: err.message || String(err) });
         });
       return true; // Keep channel open for async response
     }

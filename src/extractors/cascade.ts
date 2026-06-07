@@ -48,7 +48,7 @@ export function runExtractionCascade(): { result: Partial<import('../types').New
     const author = merged.autor || '';
     merged.texto = cleanMilenioText(merged.texto, author, title);
   }
-  if (window.location.hostname.includes('eluniversal.com.mx') && merged.texto) {
+  if (window.location.hostname.includes('eluniversal.com') && merged.texto) {
     merged.texto = cleanElUniversalText(merged.texto);
   }
   if (window.location.hostname.includes('elpais.com') && merged.texto) {

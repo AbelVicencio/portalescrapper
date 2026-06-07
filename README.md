@@ -32,7 +32,7 @@ graph TD
 ### 🧱 Componentes Principales
 
 1. **Content Scripts (`src/content/index.ts`)**: 
-   Inyectados en todas las pestañas de noticias soportadas. Detectan si el usuario se encuentra en un artículo válido, ejecutan la cascada de extracción y transmiten los datos estructurados al Service Worker. Utilizan un `MutationObserver` con control de rebote (debounce) para tolerar actualizaciones dinámicas en Single Page Applications (SPAs).
+   Inyectados en **todas las pestañas HTTPS** (`https://*/*`). Detectan si el usuario se encuentra en un artículo válido, ejecutan la cascada de extracción de 5 capas y transmiten los datos estructurados al Service Worker. La extracción es estrictamente **bajo demanda** (solo cuando el usuario hace clic en 'Extraer'). Incluyen un `MutationObserver` (`setupObservers()`) para SPAs que se encuentra **desactivado** en la versión actual para evitar capturas involuntarias.
    
 2. **Service Worker (`src/background/service-worker.ts`)**: 
    Actúa como el broker de mensajería central de la extensión. Coordina las solicitudes entre el Content Script y la UI del Side Panel, gestiona actualizaciones del badge en el icono de la extensión y actúa como respaldo local en segundo plano.
@@ -48,10 +48,12 @@ graph TD
 5. **Extractors Cascade (`src/extractors/`)**:
    Implementa una lógica en cascada de 5 capas ordenada por nivel de confianza técnica:
    - **Capa 1: JSON-LD (`jsonld.ts`)** (0.95): Extrae metadatos estandarizados de `<script type="application/ld+json">`. Es la fuente más robusta y confiable.
-   - **Capa 2: Selectores Específicos (`siteSpecific.ts`)** (0.85): Lógica curada con selectores CSS específicos por portal registrado. Ahora procesa selectores de manera secuencial ordenada por prioridad para evitar falsos positivos de fallbacks genéricos.
+   - **Capa 2: Selectores Específicos (`siteSpecific.ts`)** (0.85): Lógica curada con selectores CSS específicos por portal registrado. Los selectores se evalúan de forma secuencial (de más específico a más genérico) para evitar falsos positivos por fallbacks sueltos.
    - **Capa 3: Meta Tags (`meta.ts`)** (0.75): Lee etiquetas OpenGraph, Twitter Cards y metadatos estándar (`og:title`, `article:author`, etc.).
    - **Capa 4: Extractor Genérico (`generic.ts`)** (0.50): Heurísticas universales de densidad de texto y selectores semánticos para recuperar contenido de cualquier portal de internet sin configuración previa.
    - **Capa 5: Manual** (0.00): Cae suavemente al formulario interactivo para entrada o corrección directa del usuario.
+   
+   Tras el merge, `cascade.ts` aplica **limpiadores de texto específicos por portal** (WSJ, Milenio, El Universal, El País) sobre el resultado final.
 
 6. **Storage Wrapper (`src/storage/store.ts`)**:
    Encapsula `chrome.storage.local` proporcionando una base de datos local y offline segura de drafts antes de sincronizar con el backend central.
@@ -93,7 +95,7 @@ Si el formulario contiene un identificador de Medialog válido y cargado (ya sea
 * **Aviso y Clipboard**: Tras una actualización exitosa, se emite el Toast `"Medialog #{id} Actualizado"` y se copia de manera automática el número de Medialog al portapapeles. Si no hay cambios, notifica al usuario de forma clara sin realizar peticiones redundantes.
 * **Flujo Ágil**: Se desactiva la advertencia de cambios sin guardar en el panel durante re-extracciones consecutivas para no interrumpir el flujo del usuario.
 
-### 6. 📸 Generador de Snapshots Premium (HTML/PDF)
+### 7. 📸 Generador de Snapshots Premium (HTML/PDF)
 La extensión cuenta con un motor avanzado de previsualización e impresión (`src/extractors/snapshot.ts`) que genera documentos autocontenidos listos para archivar o imprimir a PDF con un diseño editorial de alta gama:
 * **Resolución Genérica Multicapa de Logotipos:** Busca y extrae de forma inteligente el logotipo de la marca del portal de origen sin depender de configuraciones estáticas. Evalúa clases de cabeceras, enlaces de inicio (`href="/"`) y metadatos semánticos en las imágenes o SVGs del DOM (soportando portales SPA complejos como PressReader y Reuters).
 * **Conversión Base64 Automática:** Para garantizar que el archivo HTML sea 100% autocontenido y nunca se rompan los gráficos al visualizarse offline, descarga dinámicamente recursos de imagen de logotipos relativos/absolutos y los incrusta directamente en el código usando Base64, aplicando filtros para descartar redireccionamientos HTML de SPAs.
@@ -102,6 +104,15 @@ La extensión cuenta con un motor avanzado de previsualización e impresión (`s
 * **Metadatos e Integridad para Mensajería:** Incluye etiquetas OpenGraph (`og:*`), Twitter Cards y Schema.org JSON-LD estructurado en la cabecera. Añade además `<meta name="theme-color">` dinámico que colorea la barra lateral de vista previa al compartirse en WhatsApp, Telegram, Slack o Discord.
 * **Descargas de Archivo Histórico Limpias:** Al presionar **Guardar HTML**, la extensión limpia el código al vuelo con `DOMParser` para eliminar la barra interactiva de control (`❌ Cerrar`, `💾 Guardar HTML`, `🖨️ Imprimir`) entregando un documento final pulido y enfocado exclusivamente en la nota periodística.
 * **Prefijo del Dominio Principal en Títulos (HTML/PDF):** El motor de snapshots identifica el dominio principal y le añade un formato en mayúsculas seguido de un guion al título general (ej. `ELPAIS - Sheinbaum...`). Esto hace que el título de la pestaña de impresión y el nombre por defecto de descarga del archivo HTML o PDF incluyan automáticamente esta estructura.
+
+* **Logo Base64 Pre-codificado (`base64Logos.ts`):** Para portales con logos difíciles de extraer dinámicamente (p.ej. SPAs), `snapshot.ts` puede recurrir a logos pre-codificados en Base64 almacenados en `src/extractors/base64Logos.ts`, garantizando disponibilidad offline sin solicitudes de red adicionales.
+
+### 8. 🖨️ Generación de PDF Real vía Chrome Debugger Protocol (CDP)
+Además de la impresión estándar del navegador, la extensión puede generar PDFs con **texto seleccionable real** usando el permiso `debugger` de Chrome:
+* **Mensaje `PRINT_TAB_TO_PDF`**: El Service Worker recibe este mensaje desde el Side Panel, adjunta el Chrome Debugger Protocol (CDP v1.3) a la pestaña de snapshot y llama a `Page.printToPDF`.
+* **Procesamiento de Imágenes Pre-PDF**: Antes de capturar, ejecuta un script que reduce la imagen hero (canvas JPEG, máx 380×220px) y elimina imágenes del cuerpo para mantener el tamaño del archivo razonable.
+* **Restauración Automática**: Tras la captura, se restauran todas las imágenes a su estado original vía `data-pdf-src`.
+* **Desconexion Garantizada**: El debugger se desconecta siempre en el bloque `finally`, eliminando el banner de depuración lo antes posible.
 
 ---
 
@@ -146,11 +157,14 @@ El sistema está enfocado en la productividad ágil de redacciones periodística
 │   ├── content/
 │   │   └── index.ts              # Inyección, observers de SPA e invocación de la cascada
 │   ├── extractors/
-│   │   ├── base.ts               # Clases abstractas de extracción y merge de datos
-│   │   ├── cascade.ts            # Orquestador principal de la cascada de 4 capas
+│   │   ├── base.ts               # Interfaces de ExtractorResult y lógica de Smart Text Merge
+│   │   ├── base64Logos.ts        # Cache de logos Base64 pre-codificados por portal conocido
+│   │   ├── cascade.ts            # Orquestador principal de la cascada de 5 capas + limpiadores de texto
+│   │   ├── generic.ts            # Extractor genérico por densidad de texto (Capa 4)
 │   │   ├── jsonld.ts             # Extractor de esquemas estructurados JSON-LD
 │   │   ├── meta.ts               # Extractor de OpenGraph y etiquetas Meta estándar
-│   │   └── siteSpecific.ts       # Configuración y selectores CSS específicos por portal
+│   │   ├── siteSpecific.ts       # Configuración y selectores CSS específicos por portal
+│   │   └── snapshot.ts           # Motor de snapshots HTML/PDF autocontenidos de alta gama
 │   ├── sidepanel/
 │   │   ├── sidepanel.html        # Estructura del Side Panel UI (Login / Panel principal)
 │   │   ├── sidepanel.css         # Estilo fluido con soporte de temas y zoom responsivo

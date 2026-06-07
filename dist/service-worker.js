@@ -36,7 +36,8 @@
     "EXPORT_CSV",
     "GRABAR_API",
     "EXTRACT_ARTICLE",
-    "GET_CLEAN_SNAPSHOT"
+    "GET_CLEAN_SNAPSHOT",
+    "PRINT_TAB_TO_PDF"
   ];
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || !HANDLED_MESSAGE_TYPES.includes(msg.type)) {
@@ -98,6 +99,113 @@
               payload: msg.payload
             });
             sendResponse({ ok: true, payload: response });
+            break;
+          }
+          case "PRINT_TAB_TO_PDF": {
+            const tabId = msg.payload.tabId;
+            const debugTarget = { tabId };
+            await chrome.debugger.attach(debugTarget, "1.3");
+            try {
+              await chrome.debugger.sendCommand(debugTarget, "Page.enable", {});
+              await chrome.debugger.sendCommand(debugTarget, "Runtime.enable", {});
+              const stripScript = [
+                "(function(){",
+                "  function downscaleImg(img, maxW, maxH, quality) {",
+                "    try {",
+                "      if(!img || !img.complete || !img.naturalWidth) return false;",
+                "      // Keep full aspect ratio - no crop",
+                "      var r = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);",
+                "      var w = Math.round(img.naturalWidth * r);",
+                "      var h = Math.round(img.naturalHeight * r);",
+                '      var c = document.createElement("canvas");',
+                "      c.width = w; c.height = h;",
+                '      c.getContext("2d").drawImage(img, 0, 0, w, h);',
+                '      var d = c.toDataURL("image/jpeg", quality);',
+                '      img.setAttribute("data-pdf-src", img.src);',
+                '      img.setAttribute("data-pdf-w", img.style.width);',
+                '      img.setAttribute("data-pdf-h", img.style.height);',
+                '      img.setAttribute("data-pdf-of", img.style.objectFit);',
+                "      // Pin exact pixel dimensions so CSS width:100% does not stretch",
+                '      img.style.width = w + "px";',
+                '      img.style.height = h + "px";',
+                '      img.style.objectFit = "fill";',
+                '      img.style.maxHeight = "none";',
+                "      img.src = d;",
+                "      return true;",
+                "    } catch(e) { return false; }",
+                "  }",
+                '  var hero = document.querySelector("#pdf-capture-wrapper .hero-container img, #pdf-capture-wrapper .hero-image");',
+                "  if(hero) {",
+                "    var ok = downscaleImg(hero, 380, 220, 0.55);",
+                "    if(!ok) {",
+                "      // CSS-only fallback: show complete image, not cropped",
+                '      hero.style.width = "auto";',
+                '      hero.style.maxWidth = "380px";',
+                '      hero.style.maxHeight = "220px";',
+                '      hero.style.height = "auto";',
+                '      hero.style.objectFit = "contain";',
+                '      var hc = hero.closest(".hero-container");',
+                '      if(hc) { hc.style.textAlign = "left"; hc.style.overflow = "visible"; }',
+                "    } else {",
+                "      // Center the fixed-size downscaled image",
+                '      var hc2 = hero.closest(".hero-container");',
+                '      if(hc2) { hc2.style.textAlign = "left"; hc2.style.overflow = "visible"; hc2.style.maxHeight = "none"; }',
+                "    }",
+                "  }",
+                '  document.querySelectorAll("#pdf-capture-wrapper img").forEach(function(img){',
+                '    var isLogo = img.closest(".portal-top-bar") || img.closest("header");',
+                '    var isHero = img.closest(".hero-container") || img.classList.contains("hero-image");',
+                "    if(!isLogo && !isHero){",
+                '      img.setAttribute("data-pdf-src", img.src||"");',
+                '      img.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";',
+                '      img.style.maxHeight="0"; img.style.overflow="hidden";',
+                "    }",
+                "  });",
+                '  document.querySelectorAll("#pdf-capture-wrapper figure,#pdf-capture-wrapper .article-image").forEach(function(el){',
+                '    if(!el.closest(".hero-container")) el.style.display="none";',
+                "  });",
+                "  window.__pdfImagesStripped=true;",
+                "})()"
+              ].join("\n");
+              await chrome.debugger.sendCommand(debugTarget, "Runtime.evaluate", { expression: stripScript, awaitPromise: false });
+              const result = await chrome.debugger.sendCommand(debugTarget, "Page.printToPDF", {
+                landscape: false,
+                displayHeaderFooter: false,
+                printBackground: true,
+                scale: 1,
+                paperWidth: 8.5,
+                paperHeight: 11,
+                marginTop: 0.4,
+                marginBottom: 0.4,
+                marginLeft: 0.4,
+                marginRight: 0.4,
+                preferCSSPageSize: false
+              });
+              sendResponse({ ok: true, payload: { data: result.data } });
+              const restoreScript = [
+                "(function(){",
+                "  if(!window.__pdfImagesStripped) return;",
+                '  document.querySelectorAll("[data-pdf-src]").forEach(function(img){',
+                '    img.src = img.getAttribute("data-pdf-src")||"";',
+                '    img.style.width = img.getAttribute("data-pdf-w")||"";',
+                '    img.style.height = img.getAttribute("data-pdf-h")||"";',
+                '    img.style.objectFit = img.getAttribute("data-pdf-of")||"";',
+                '    img.style.maxHeight=""; img.style.overflow="";',
+                '    img.removeAttribute("data-pdf-src");',
+                '    img.removeAttribute("data-pdf-w");',
+                '    img.removeAttribute("data-pdf-h");',
+                '    img.removeAttribute("data-pdf-of");',
+                "  });",
+                '  document.querySelectorAll("#pdf-capture-wrapper figure,#pdf-capture-wrapper .hero-image,#pdf-capture-wrapper .article-image").forEach(function(el){el.style.display="";});',
+                "  window.__pdfImagesStripped=false;",
+                "})()"
+              ].join("\n");
+              chrome.debugger.sendCommand(debugTarget, "Runtime.evaluate", { expression: restoreScript, awaitPromise: false }).catch(() => {
+              });
+            } finally {
+              chrome.debugger.detach(debugTarget).catch(() => {
+              });
+            }
             break;
           }
         }

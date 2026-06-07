@@ -93,6 +93,14 @@ button:hover {
 button:active {
   transform: scale(0.96);
   background-color: var(--accent-active);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 button.secondary {
@@ -414,4 +422,18 @@ body.light #btn-clear-all, body.light #btn-clear-storage {
 
 body.light #btn-clear-all:hover, body.light #btn-clear-storage:hover {
   background: #fecaca;
+}
+/* PDF footer – forces a page break and adds spacing */
+.pdf-footer {
+  page-break-before: always;
+  padding-top: 20px;
+  font-size: 10px;
+  color: #555;
+  text-align: center;
+}
+
+/* Prevent images from overflowing PDF bounds */
+#pdf-capture-wrapper img {
+  max-width: 100%;
+  height: auto;
 }

@@ -338,7 +338,7 @@ function DatosArchivo(){
 	               
 	     	}
 		}
-    } /*de si archivos*/
+    } /*de si archivos*/ 
     else {
         if (x.value == "") {
             txt += "Seleccione el archivo a cargar";

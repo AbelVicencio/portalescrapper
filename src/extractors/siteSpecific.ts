@@ -89,9 +89,9 @@ export const SITE_CONFIGS: Record<string, SiteConfig> = {
     brandColor: '#ffffff',
     logoHtml: '<img src="https://static.elpais.com/dist/resources/images/logos/primary/el-pais-50.svg" alt="EL PAÍS" class="extracted-img-logo" style="height: 30px;" />'
   },
-  'eluniversal.com.mx': {
+  'eluniversal.com': {
     name: 'El Universal',
-    hostPatterns: ['eluniversal.com.mx'],
+    hostPatterns: ['eluniversal.com.mx', 'eluniversal.com'],
     selectors: {
       title: 'h1.title, h1.article-title',
       author: '.sc__author-nota, .author',
@@ -99,7 +99,8 @@ export const SITE_CONFIGS: Record<string, SiteConfig> = {
       content: '.sc__font-paragraph, .sc__header, .sc__paragraph-list li, .story-content p, .timeline-card p',
       paywall: '.paywall, .premium-banner'
     },
-    brandColor: '#ffffff'
+    brandColor: '#ffffff',
+    logoAsset: 'src/assets/logos/eluniversal.png'
   },
   'reforma.com': {
     name: 'Reforma',
@@ -1038,9 +1039,10 @@ export function extractSiteSpecific(host: string): ExtractorResult {
   if (host.includes('bloomberg.com') && contentText) {
     contentText = cleanBloombergText(contentText);
   }
-  if (host.includes('eluniversal.com.mx') && contentText) {
+  if (host.includes('eluniversal.com') && contentText) {
     contentText = cleanElUniversalText(contentText);
   }
+
   if (host.includes('reforma.com') && contentText) {
     contentText = cleanReformaText(contentText);
   }

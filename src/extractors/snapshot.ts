@@ -31,17 +31,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
   fecha?: string;
   medio?: string;
   medialogId?: string;
-  token?: string;
 }): Promise<{ html: string; title: string; originalUrl: string }> {
-  let html2pdfUrl = '';
-  let snapshotHelperUrl = '';
-  try {
-    html2pdfUrl = chrome.runtime.getURL('dist/html2pdf.bundle.min.js');
-    snapshotHelperUrl = chrome.runtime.getURL('dist/snapshot-helper.js');
-  } catch (e) {
-    console.warn('[PortalScrapper] Could not resolve resources URL:', e);
-  }
-
   // 1. Clone the current document to avoid mutating the live page
   const doc = document.cloneNode(true) as Document;
   const hostname = window.location.hostname;
@@ -263,7 +253,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
   }
 
   let pageDate = '';
-  if (hostname.includes('eluniversal.com.mx')) {
+  if (hostname.includes('eluniversal.com')) {
     const category = doc.querySelector('.sc__author--category')?.textContent?.trim() || '';
     const rawDate = doc.querySelector('.sc__author--date')?.textContent?.trim() || '';
     if (category || rawDate) {
@@ -955,6 +945,10 @@ export async function getCleanSnapshotHTML(overrideData?: {
   const resolvedTitleFont = siteConfig?.titleFontFamily || "'Playfair Display', 'Times New Roman', serif";
 
   const cleanSubtitle = (subtitleVal || '').replace(/"/g, '&quot;').replace(/[\r\n]+/g, ' ').trim();
+  const jsonLdAuthor = (authorVal || '').replace(/"/g, '\\"').trim() || 'Redacción';
+  const jsonLdTitle = title.replace(/"/g, '\\"');
+  const jsonLdPublisher = sourceName.replace(/"/g, '\\"');
+  const jsonLdImage = heroImageSrc ? `"${heroImageSrc}"` : '[]';
 
   // Compose the premium PrintFriendly snapshot HTML
   const finalHtml = `<!DOCTYPE html>
@@ -982,13 +976,29 @@ export async function getCleanSnapshotHTML(overrideData?: {
   <!-- Premium color accent for link preview sidebars (Telegram, Discord, Slack) -->
   <meta name="theme-color" content="${themeColor}">
 
-  ${html2pdfUrl ? `<script src="${html2pdfUrl}"></script>` : ''}
-  ${snapshotHelperUrl ? `<script src="${snapshotHelperUrl}"></script>` : ''}
-
+  <!-- Schema.org Structured Metadata for Crawlers & Previews -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "NewsArticle",
+    "headline": "${jsonLdTitle}",
+    "image": ${jsonLdImage.startsWith('"') ? `[${jsonLdImage}]` : '[]'},
+    "datePublished": "${pageDate || new Date().toISOString()}",
+    "author": [{
+      "@type": "Person",
+      "name": "${jsonLdAuthor}"
+    }],
+    "publisher": {
+      "@type": "Organization",
+      "name": "${jsonLdPublisher}"
+    }
+  }
+  </script>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,400&family=Lora:ital,wght@0,400;0,500;1,400&family=Inter:wght@400;500;600&family=Libre+Bodoni:wght@400;700&display=swap" rel="stylesheet">
+  <script src="${chrome.runtime.getURL('dist/html2pdf.bundle.min.js')}"></script>
   <style>
     /* Extracted @font-face rules from source page */
     ${extractedFontFaceCSS}
@@ -1009,50 +1019,11 @@ export async function getCleanSnapshotHTML(overrideData?: {
     body {
       font-family: ${resolvedBodyFont};
       color: #1e293b;
-      color: var(--text-color);
       background-color: ${resolvedBgColor};
-      background-color: var(--bg-color);
       line-height: 1.65;
       margin: 0;
       padding: 0;
       -webkit-font-smoothing: antialiased;
-    }
-
-    /* Local Alert Banner */
-    .local-alert {
-      position: fixed;
-      top: 80px;
-      right: 24px;
-      padding: 12px 20px;
-      border-radius: 8px;
-      font-family: 'Inter', sans-serif;
-      font-size: 14px;
-      font-weight: 500;
-      z-index: 2000;
-      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      opacity: 0;
-      transform: translateY(-20px);
-      pointer-events: none;
-    }
-    .local-alert.show {
-      opacity: 1;
-      transform: translateY(0);
-    }
-    .local-alert.success {
-      background-color: #f0fdf4;
-      color: #166534;
-      border: 1px solid #bbf7d0;
-    }
-    .local-alert.warning {
-      background-color: #fffbeb;
-      color: #92400e;
-      border: 1px solid #fef3c7;
-    }
-    .local-alert.error {
-      background-color: #fef2f2;
-      color: #991b1b;
-      border: 1px solid #fca5a5;
     }
 
     /* Floating Action Bar */
@@ -1061,7 +1032,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
       top: 0;
       background: rgba(255, 255, 255, 0.9);
       backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border-color);
+      border-bottom: 1px solid #e2e8f0;
       padding: 14px 24px;
       display: flex;
       justify-content: space-between;
@@ -1074,7 +1045,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
       font-family: 'Inter', sans-serif;
       font-weight: 600;
       font-size: 14px;
-      color: var(--primary-color);
+      color: #0f172a;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -1199,7 +1170,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
 
     .portal-section-bar {
       padding: 8px 0;
-      border-bottom: 1px solid var(--border-color);
+      border-bottom: 1px solid #e2e8f0;
       margin-bottom: 16px;
       display: flex;
       justify-content: space-between;
@@ -1213,7 +1184,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.08em;
-      color: var(--meta-color);
+      color: #64748b;
       line-height: 1;
       margin: 0;
       z-index: 10;
@@ -1295,7 +1266,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
       font-size: 30px;
       line-height: 1.25;
       font-weight: 700;
-      color: var(--primary-color);
+      color: #0f172a;
       margin: 0 0 16px 0;
       text-align: left;
     }
@@ -1313,7 +1284,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
     .article-meta {
       font-family: 'Inter', sans-serif;
       font-size: 13px;
-      color: var(--meta-color);
+      color: #64748b;
       display: flex;
       flex-wrap: wrap;
       gap: 20px;
@@ -1440,7 +1411,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
 
     .article-body h1, .article-body h2, .article-body h3, .article-body h4 {
       font-family: 'Playfair Display', serif;
-      color: var(--primary-color);
+      color: #0f172a;
       margin: 36px 0 18px 0;
       line-height: 1.3;
     }
@@ -1454,7 +1425,7 @@ export async function getCleanSnapshotHTML(overrideData?: {
     }
 
     .article-body blockquote {
-      border-left: 4px solid var(--accent-color);
+      border-left: 4px solid #e11d48;
       padding-left: 20px;
       margin: 28px 0;
       font-style: italic;
@@ -1488,18 +1459,19 @@ export async function getCleanSnapshotHTML(overrideData?: {
 
     .original-url-footer {
       margin-top: 60px;
-      border-top: 1px solid var(--border-color);
+      border-top: 1px solid #e2e8f0;
       padding-top: 24px;
+      padding-bottom: 40px;
       font-family: 'Inter', sans-serif;
       font-size: 12px;
-      color: var(--meta-color);
+      color: #64748b;
       word-break: break-all;
       text-align: center;
       line-height: 1.5;
     }
 
     .original-url-footer a {
-      color: var(--primary-color);
+      color: #0f172a;
       text-decoration: underline;
     }
 
@@ -1545,16 +1517,17 @@ export async function getCleanSnapshotHTML(overrideData?: {
     }
   </style>
 </head>
-<body data-medialog-id="${overrideData?.medialogId || ''}" data-superabstract="${(overrideData?.superabstract || '').replace(/"/g, '&quot;')}" data-api-token="${overrideData?.token || ''}">
+<body>
   <div class="action-bar">
     <div class="brand">
       <span>📰 PortalScrapper Snapshot</span>
+      <span id="snapshot-status" style="margin-left: 15px; font-size: 13px; color: #475569; font-weight: normal; display: none;"></span>
     </div>
     <div class="buttons">
       <button class="btn" id="btn-snapshot-close">❌ Cerrar</button>
       <button class="btn" id="btn-snapshot-save">💾 Guardar HTML</button>
-      <button class="btn" id="btn-snapshot-upload" style="background-color: #0284c7; border-color: #0284c7; color: white;">📤 Guardar PDF</button>
       <button class="btn btn-primary" id="btn-snapshot-print">🖨️ Imprimir</button>
+      <button class="btn btn-primary" id="btn-snapshot-upload-pdf" style="background: #e11d48; color: white; border-color: #e11d48;">📤 Guardar PDF</button>
     </div>
   </div>
 

@@ -3,7 +3,7 @@ import * as storage from '../storage/store';
 import * as clipboard from '../utils/clipboard';
 import * as exportUtils from '../utils/export';
 import { login, logout, getCurrentUser } from '../api/auth';
-import { resolvePortalByDomain, resolveEmisionPorEmisoraYFecha, grabarMedialog, patchMedialog, buscarMedialogDuplicado, crearRelacionMedialog, getMedialogHash, type GrabarMedialogPayload } from '../api/client';
+import { resolvePortalByDomain, resolveEmisionPorEmisoraYFecha, grabarMedialog, patchMedialog, buscarMedialogDuplicado, crearRelacionMedialog, getMedialogHash, cargarPDF, type GrabarMedialogPayload } from '../api/client';
 import { PORTAL_CLASSIFICATIONS } from '../config/portalClassifications';
 
 // ============================================================================
@@ -331,57 +331,10 @@ function showToast(msg: string, timeout = 2400, extraClass = '') {
   if (extraClass) t.classList.add(...extraClass.split(' '));
   t.classList.add('show');
   setTimeout(() => {
-    if (t) {
-      t.classList.remove('show');
-      if (extraClass) t.classList.remove(...extraClass.split(' '));
-    }
+    t.classList.remove('show');
+    if (extraClass) t.classList.remove(...extraClass.split(' '));
   }, timeout);
 }
-(window as any).showToast = showToast;
-
-(window as any).copyPrintPathToClipboard = async function(medialogId: number | string) {
-  try {
-    const result = await chrome.storage.local.get('pdfDefaultFolder');
-    const defaultFolder = result.pdfDefaultFolder || '\\\\10.0.5.225\\rec24h\\mediarchivos\\medialogs';
-    const fullNetworkPath = `${defaultFolder}\\${medialogId}.pdf`;
-    await navigator.clipboard.writeText(fullNetworkPath);
-    showToast('📋 Ruta de red y nombre copiados al clipboard', 2500, 'large green');
-  } catch (err) {
-    console.warn('Error copying print path to clipboard:', err);
-  }
-};
-
-(window as any).uploadPdfBlob = async function(blob: Blob, medialogId: number | string) {
-  const extension = 'pdf';
-  const nomArchivo = `${medialogId}.${extension}`;
-  const formData = new FormData();
-  formData.append('file1', blob, nomArchivo);
-  formData.append('nomArchivo', nomArchivo);
-  formData.append('tamanio', blob.size.toString());
-  formData.append('extension', extension);
-  
-  const titleClean = (el('superabstract') as HTMLTextAreaElement)?.value || `${medialogId}`;
-  formData.append('texto', `${titleClean.replace(/[/\\?%*:|"<>]/g, '-').trim()}.pdf`);
-  formData.append('cabeza', '');
-  formData.append('fDocumento', '');
-
-  const response = await fetch('https://www.medialog.com.mx/portales/CargaPDF.asp?Func=2', {
-    method: 'POST',
-    body: formData,
-    credentials: 'include'
-  });
-
-  if (!response.ok) {
-    throw new Error(`Servidor respondió con código HTTP ${response.status}`);
-  }
-
-  const responseText = await response.text();
-  if (!responseText.includes("archivo adjunto cargado") && !responseText.includes("Guardando Adjunto")) {
-    console.error('[PortalScrapper] Respuesta del servidor:', responseText);
-    throw new Error('El servidor no confirmó el éxito de la carga.');
-  }
-  return true;
-};
 
 async function renderHistory() {
   const container = el('history-list');
@@ -1014,6 +967,24 @@ async function handleGrabarAPI() {
   }
 }
 
+async function copyTextToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  ta.style.top = '-9999px';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  const ok = document.execCommand('copy');
+  document.body.removeChild(ta);
+  if (!ok) throw new Error('copyCommandFailed');
+}
+
 async function handleGeneratePDF() {
   if (!(await ensureValidSession())) return;
 
@@ -1037,27 +1008,38 @@ async function handleGeneratePDF() {
       autor: (el('autor') as HTMLInputElement)?.value || '',
       fecha: (el('fecha_transcripcion') as HTMLInputElement)?.value || '',
       medio: (el('medio') as HTMLInputElement)?.value || '',
-      medialogId: (el('dbRecordId') as HTMLInputElement)?.value || '',
-      token: currentToken || ''
+      medialogId: (el('dbRecordId') as HTMLInputElement)?.value || ''
     };
 
-    const response = await new Promise<any>((resolve, reject) => {
-      chrome.runtime.sendMessage(
-        { 
-          type: 'GET_CLEAN_SNAPSHOT',
-          payload: editedFields
-        },
-        (res) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else if (res && !res.ok) {
-            reject(new Error(res.error || 'Error al obtener snapshot'));
-          } else {
-            resolve(res);
+
+
+const response = await new Promise<any>((resolve, reject) => {
+        // Timeout para evitar bloqueos si el content script no responde
+        const timeoutId = setTimeout(() => {
+          reject(new Error('Timeout esperando respuesta del content script (7 segundos)'));
+        }, 7000);
+
+        chrome.tabs.sendMessage(tab.id, 
+          { 
+            type: 'GET_CLEAN_SNAPSHOT',
+            payload: editedFields
+          },
+          (res) => {
+            clearTimeout(timeoutId);
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else if (!res) {
+              reject(new Error('No se recibió respuesta del content script. ¿Está inyectado en la página actual?'));
+            } else if (!res.ok) {
+              reject(new Error(res.error || 'Error al obtener snapshot'));
+            } else if (!res.payload) {
+              reject(new Error('La respuesta no contiene el payload del snapshot'));
+            } else {
+              resolve(res);
+            }
           }
-        }
-      );
-    });
+        );
+      });
 
     if (!response || !response.payload) {
       throw new Error('No se recibió el contenido del snapshot');
@@ -1075,13 +1057,187 @@ async function handleGeneratePDF() {
     printWindow.document.write(html);
     printWindow.document.close();
 
-    // Dynamically set document title to the medialogId if present
-    // This automatically names the file as {medialogId}.pdf when using standard browser print-to-PDF!
-    const dbIdInput = el('dbRecordId') as HTMLInputElement | null;
-    const dbIdVal = dbIdInput?.value || '';
-    const medialogId = parseInt(dbIdVal, 10);
-    if (medialogId && !isNaN(medialogId)) {
-      printWindow.document.title = `${medialogId}`;
+    const setupListeners = () => {
+      const closeBtn = printWindow.document.getElementById('btn-snapshot-close');
+      const printBtn = printWindow.document.getElementById('btn-snapshot-print');
+
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          printWindow.close();
+        });
+      }
+
+      if (printBtn) {
+        printBtn.addEventListener('click', async () => {
+          try {
+            const dbIdInput = el('dbRecordId') as HTMLInputElement | null;
+            const dbIdVal = dbIdInput?.value || '';
+            const medialogId = parseInt(dbIdVal, 10);
+            if (medialogId && !isNaN(medialogId)) {
+              const result = await chrome.storage.local.get('pdfDefaultFolder');
+              const defaultFolder = result.pdfDefaultFolder || '\\\\10.0.5.225\\rec24h\\mediarchivos\\medialogs';
+              const fullNetworkPath = `${defaultFolder}\\${medialogId}.pdf`;
+              await navigator.clipboard.writeText(fullNetworkPath);
+              showToast('📋 Ruta de red y nombre copiados al clipboard', 2500, 'large green');
+            }
+          } catch (clipErr) {
+            console.warn('Error copying print path to clipboard:', clipErr);
+          }
+
+          // Trigger native browser printing
+          printWindow.print();
+        });
+      }
+
+      const saveBtn = printWindow.document.getElementById('btn-snapshot-save');
+      if (saveBtn) {
+        saveBtn.addEventListener('click', () => {
+          const cleanTitle = (response.payload.title || 'snapshot').replace(/[/\\?%*:|"<>]/g, '-').trim();
+          const filename = `${cleanTitle}.html`;
+          
+          let savedHtml = html;
+          try {
+            const docParser = new DOMParser().parseFromString(html, 'text/html');
+            const actionBar = docParser.querySelector('.action-bar');
+            if (actionBar) {
+              actionBar.remove();
+            }
+            savedHtml = '<!DOCTYPE html>\n' + docParser.documentElement.outerHTML;
+          } catch (e) {
+            console.warn('[PortalScrapper] Error cleaning action-bar from saved HTML:', e);
+          }
+
+          const blob = new Blob([savedHtml], { type: 'text/html;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          
+          const a = printWindow.document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          printWindow.document.body.appendChild(a);
+          a.click();
+          
+          setTimeout(() => {
+            printWindow.document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          }, 100);
+        });
+      }
+
+       const uploadPdfBtn = printWindow.document.getElementById('btn-snapshot-upload-pdf');
+       const statusSpan = printWindow.document.getElementById('snapshot-status');
+       if (uploadPdfBtn) {
+         uploadPdfBtn.addEventListener('click', async () => {
+           // Obtener el medialogId de la respuesta del snapshot (que vino del content script)
+           const medialogId = parseInt(response.payload.medialogId, 10);
+
+           if (!medialogId || isNaN(medialogId)) {
+             if (statusSpan) {
+               statusSpan.textContent = '⚠️ Error: Debe grabar la nota primero.';
+               statusSpan.style.display = 'inline';
+               statusSpan.style.color = '#e11d48';
+             }
+             showToast('⚠️ Grabe primero la nota en Medialog', 4000);
+             return;
+           }
+
+          uploadPdfBtn.disabled = true;
+          if (statusSpan) {
+            statusSpan.textContent = '⏳ Generando PDF...';
+            statusSpan.style.display = 'inline';
+            statusSpan.style.color = '#475569';
+          }
+
+          try {
+            // ── CDP Page.printToPDF via Service Worker ──
+            // Uses Chrome’s native print engine → real selectable text, small files,
+            // identical to the @media print layout. No html2canvas/bitmap needed.
+            if (statusSpan) {
+              statusSpan.textContent = '⏳ Generando PDF (motor nativo)...';
+              statusSpan.style.color = '#475569';
+            }
+
+            // Find the snapshot tab (it was opened as window.open with a blob: URL)
+            const allTabs = await chrome.tabs.query({});
+            const snapshotTab = allTabs.find(t => {
+              if (!t.url) return false;
+              try { return new URL(t.url).hostname === ''; } catch { return false; }
+            }) || allTabs.find(t => t.url?.startsWith('blob:'));
+
+            if (!snapshotTab?.id) {
+              throw new Error('No se encontró la pestaña del snapshot. ¿Está abierta?');
+            }
+
+            // Ask service worker to print the tab via CDP
+            const swResp = await chrome.runtime.sendMessage({
+              type: 'PRINT_TAB_TO_PDF',
+              payload: { tabId: snapshotTab.id }
+            });
+
+            if (!swResp?.ok || !swResp?.payload?.data) {
+              throw new Error(swResp?.error || 'No se pudo generar el PDF via CDP.');
+            }
+
+            // Convert base64 PDF to Blob
+            const b64 = swResp.payload.data;
+            const binary = atob(b64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            const pdfBlob = new Blob([bytes], { type: 'application/pdf' });
+
+            if (pdfBlob.size > 10.5 * 1024 * 1024) {
+              throw new Error('El archivo PDF generado excede el límite máximo de 10.5 MB.');
+            }
+
+            if (statusSpan) {
+              statusSpan.textContent = `⏳ Subiendo PDF (${(pdfBlob.size / 1024).toFixed(1)} KB)...`;
+              statusSpan.style.color = '#3b82f6';
+            }
+
+const success = await cargarPDF(medialogId, pdfBlob);
+
+            if (success) {
+              playBellSound();
+              if (statusSpan) {
+                statusSpan.textContent = '✅ PDF guardado con éxito en el servidor.';
+                statusSpan.style.color = '#10b981';
+              }
+              showToast('✅ PDF guardado con éxito en el servidor', 3000, 'large green');
+            } else {
+              throw new Error('El servidor rechazó la carga del PDF.');
+            }
+          } catch (error: any) {
+            console.error('[PortalScrapper] Error al generar/subir PDF:', error);
+            if (statusSpan) {
+              statusSpan.textContent = `❌ Error: ${error.message || String(error)}`;
+              statusSpan.style.color = '#e11d48';
+            }
+            showToast(`❌ Error: ${error.message || String(error)}`, 5000);
+          } finally {
+            uploadPdfBtn.disabled = false;
+
+          }
+        });
+      }
+
+      // Dynamically set document title to the medialogId if present
+      // This automatically names the file as {medialogId}.pdf when using standard browser print-to-PDF!
+      try {
+        const dbIdInput = el('dbRecordId') as HTMLInputElement | null;
+        const dbIdVal = dbIdInput?.value || '';
+        const medialogId = parseInt(dbIdVal, 10);
+        if (medialogId && !isNaN(medialogId)) {
+          printWindow.document.title = `${medialogId}`;
+        }
+      } catch (titleErr) {
+        console.warn('Error setting document title:', titleErr);
+      }
+    };
+
+    // Wait for the window resources (including html2pdf script) to be fully loaded
+    if (printWindow.document.readyState === 'complete') {
+      setupListeners();
+    } else {
+      printWindow.addEventListener('load', setupListeners);
     }
 
     showToast('Snapshot generado con éxito');
@@ -1303,6 +1459,31 @@ function playTicSound() {
     osc.stop(ctx.currentTime + 0.04);
   } catch (e) {
     console.warn('[PortalScrapper] Sound feedback failed:', e);
+  }
+}
+
+function playBellSound() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(800, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.05);
+    
+    gain.gain.setValueAtTime(0.06, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+    
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.15);
+  } catch (e) {
+    console.warn('[PortalScrapper] Bell sound failed:', e);
   }
 }
 
